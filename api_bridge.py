@@ -1,101 +1,234 @@
-﻿from flask import Flask, request, jsonify, send_from_directory
-import subprocess
-import requests
+﻿import os
 import re
+import time
+import requests
+from pathlib import Path
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-app = Flask(__name__, static_folder='.')
+# ==========================================
+# 1. CONFIGURAÇÕES
+# ==========================================
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
+MODEL = os.getenv("OLLAMA_MODEL", "llama3.2:3b")
 
-historico_conversa = [
-    {"role": "system", "content": "Você é o Atlas Agentic, um assistente de engenharia de software da iFroix. A iFroix foca na conversão de código legado (COBOL e RPG/RPGLE) para Java 21. Você é educado, direto e focado em ajudar o Tech Lead Flavio Frois com o pipeline de modernização."}
-]
+COBOL_ROOT = Path(
+    os.getenv("COBOL_ROOT", r"D:\Workspace\01-Products\nw-poc\legacy-cobol")
+).resolve()
+JAVA_ROOT = (
+    Path(os.getcwd())
+    / "src"
+    / "main"
+    / "java"
+    / "com"
+    / "ifroix"
+    / "orders"
+    / "programs"
+)
+TIMEOUT_SEC = 180
 
-@app.route('/')
-def index():
-    return send_from_directory('.', 'index.html')
+JAVA_ROOT.mkdir(parents=True, exist_ok=True)
 
-@app.route('/api/convert', methods=['POST'])
-def convert():
-    return jsonify({
-        "status": "success",
-        "steps": [
-            {"nome": "1. Ingestão", "detalhe": "15 arquivos lidos.", "status": "green"},
-            {"nome": "2. Orquestração", "detalhe": "Atlas assumiu o pipeline.", "status": "green"},
-            {"nome": "3. Geração (GenerateAST)", "detalhe": "Traduzindo para Java 21...", "status": "orange"},
-            {"nome": "4. Conferência (ConfereAST)", "detalhe": "Aguardando geração.", "status": "grey"},
-            {"nome": "5. Entrega", "detalhe": "Aguardando validação.", "status": "grey"}
-        ]
-    })
+app = FastAPI(title="Atlas Agentic API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@app.route('/api/chat', methods=['POST'])
-def chat():
-    global historico_conversa
-    dados = request.json
-    mensagem = dados.get('message', '')
-    
-    palavras_chave = ["converter", "conversão", "cbl", "rpgle", "rpg", "rodar", "pipeline"]
-    if any(palavra in mensagem.lower() for palavra in palavras_chave):
-        
-        match = re.search(r'([a-zA-Z0-9_-]+\.(sqlrpgle|rpgle|rpg|cbl))', mensagem, re.IGNORECASE)
-        
-        if not match:
-            resposta = "Entendido! Qual é o nome do arquivo que você deseja converter? (Ex: CFC018.rpgle)"
-            historico_conversa.append({"role": "assistant", "content": resposta})
-            return jsonify({"response": resposta})
-            
-        caminho_arquivo = match.group(1)
-        
-        pasta_poc = r"D:\Workspace\01-Products\mega-rag-clean"
-        script_atual = r"rpgle_chunker.py" 
-        
-        try:
-            resultado = subprocess.run(
-                ["python", script_atual, caminho_arquivo],
-                cwd=pasta_poc, capture_output=True, text=True, check=True, encoding='utf-8'
-            )
-            
-            if resultado.stdout.strip() == "":
-                texto_saida = "O script executou sem erros, mas não retornou texto no terminal."
-            else:
-                texto_saida = resultado.stdout.strip()
-            
-            resposta = f"🚀 **Conversão do arquivo {caminho_arquivo} iniciada!**\n\nResultado do pipeline:\n```\n{texto_saida}\n```"
-            
-            historico_conversa.append({"role": "user", "content": mensagem})
-            historico_conversa.append({"role": "assistant", "content": resposta})
-            
-            return jsonify({"response": resposta})
-            
-        except subprocess.CalledProcessError as e:
-            erro_msg = f"❌ **Erro ao converter {caminho_arquivo}:**\n```\n{e.stderr.strip()}\n```"
-            return jsonify({"response": erro_msg})
-        except Exception as e:
-            return jsonify({"response": f"❌ Erro inesperado: {str(e)}"})
 
-    historico_conversa.append({"role": "user", "content": mensagem})
-    
-    if len(historico_conversa) > 7:
-        historico_conversa = [historico_conversa[0]] + historico_conversa[-6:]
+# ==========================================
+# 2. MODELOS DE DADOS
+# ==========================================
+class ConvertRequest(BaseModel):
+    arquivo: str
+
+
+class ConvertResponse(BaseModel):
+    ok: bool
+    java_path: str
+    java_code: str
+    warnings: list[str]
+    duration_ms: int
+    model: str
+
+
+# ==========================================
+# 3. SERVIÇOS
+# ==========================================
+def safe_read_cobol(filename: str) -> str:
+    target_path = (COBOL_ROOT / filename).resolve()
+    if not str(target_path).startswith(str(COBOL_ROOT)):
+        raise HTTPException(status_code=403, detail="Acesso negado: Path traversal.")
+
+    if not target_path.exists():
+        print(f"⚠️ Arquivo {filename} não encontrado. Gerando um COBOL de teste...")
+        mock_cobol = """       IDENTIFICATION DIVISION.
+       PROGRAM-ID. HELLO-WORLD.
+       PROCEDURE DIVISION.
+           DISPLAY 'HELLO, ATLAS AGENTIC!'.
+           STOP RUN.
+"""
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write(mock_cobol)
+
+    with open(target_path, "r", encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+def build_prompt(cobol_code: str, class_name: str) -> str:
+    return f"""Você é um engenheiro de software sênior especialista em modernização de sistemas legados.
+Sua tarefa é converter o código COBOL fornecido abaixo para Java 21 puro (sem frameworks como Spring).
+
+REGRAS OBRIGATÓRIAS:
+1. O nome da classe pública DEVE SER EXATAMENTE: {class_name}
+2. Preserve a lógica original EXATAMENTE como está.
+3. Use recursos modernos do Java 21 (ex: `var`, API `java.nio.file.Files` e `Path`).
+4. Use `try-with-resources` para fechar arquivos automaticamente.
+5. Não invente bibliotecas externas.
+6. Retorne APENAS o código Java, envolvido em um bloco de markdown.
+
+Código COBOL:
+{cobol_code}
+"""
+
+
+def extract_java(llm_output: str, expected_class_name: str) -> tuple[str, list[str]]:
+    warnings = []
+
+    # Tenta achar o bloco markdown
+    match = re.search(
+        r"```(?:java|markdown)?\s*(.*?)```", llm_output, re.DOTALL | re.IGNORECASE
+    )
+
+    if match:
+        raw_code = match.group(1).strip()
+    else:
+        warnings.append("Llama não retornou bloco markdown. Extraindo código bruto.")
+        raw_code = llm_output.strip()
+
+    # LIMPEZA 1: Acha o início real do código Java
+    start_match = re.search(
+        r"(import\s+|package\s+|public\s+class\s+|public\s+record\s+|class\s+)",
+        raw_code,
+    )
+    if start_match:
+        java_code = raw_code[start_match.start() :]
+    else:
+        inicio = raw_code.find("{")
+        java_code = raw_code[inicio:] if inicio != -1 else raw_code
+
+    # LIMPEZA 2: Acha o final real do código Java (última chave)
+    fim = java_code.rfind("}")
+    if fim != -1:
+        java_code = java_code[: fim + 1]
+    else:
+        warnings.append(
+            "Não foi possível encontrar o final da classe (chave '}' ausente)."
+        )
+
+    # Validações
+    if java_code.count("{") != java_code.count("}"):
+        warnings.append("Atenção: Chaves desbalanceadas no código Java gerado.")
+
+    if (
+        f"class {expected_class_name}" not in java_code
+        and f"record {expected_class_name}" not in java_code
+    ):
+        warnings.append(f"Atenção: A classe gerada não se chama {expected_class_name}.")
+
+    return java_code, warnings
+
+
+# ==========================================
+# 4. ENDPOINT PRINCIPAL
+# ==========================================
+@app.post("/api/convert")
+async def convert_cobol(req: ConvertRequest):
+    start_time = time.time()
+
+    class_name = Path(req.arquivo).stem.capitalize()
+    cobol_code = safe_read_cobol(req.arquivo)
+
+    prompt = build_prompt(cobol_code, class_name)
+    payload = {
+        "model": MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": 0.1},
+    }
 
     try:
-        res = requests.post('http://localhost:11434/api/chat', json={
-            "model": "llama3.2:3b", 
-            "messages": historico_conversa,
-            "stream": False
-        }, timeout=120) 
-        
-        retorno_ollama = res.json()
-        
-        if 'error' in retorno_ollama:
-            return jsonify({"response": f"O Ollama retornou um erro: {retorno_ollama['error']}"})
-            
-        resposta_ia = retorno_ollama.get('message', {}).get('content', 'O Ollama não devolveu texto.')
-        historico_conversa.append({"role": "assistant", "content": resposta_ia})
-        
-        return jsonify({"response": resposta_ia.strip()})
-        
-    except Exception as e:
-        return jsonify({"response": f"Erro de conexão com o Ollama: {str(e)}. O Ollama está aberto?"})
+        response = requests.post(OLLAMA_URL, json=payload, timeout=TIMEOUT_SEC)
+        response.raise_for_status()
+        llm_raw = response.json().get("response", "")
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(status_code=502, detail="Ollama não está rodando.")
+    except requests.exceptions.Timeout:
+        raise HTTPException(
+            status_code=504, detail=f"Timeout: Ollama demorou mais de {TIMEOUT_SEC}s."
+        )
 
-if __name__ == '__main__':
-    print("API Bridge rodando em http://localhost:8000")
-    app.run(port=8000, debug=True)
+    java_code, warnings = extract_java(llm_raw, class_name)
+
+    out_filename = f"{class_name}.java"
+    out_path = JAVA_ROOT / out_filename
+
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(java_code)
+
+    duration = int((time.time() - start_time) * 1000)
+
+    return {
+        "ok": len(warnings) == 0,
+        "java_path": str(out_path.absolute()),
+        "java_code": java_code,
+        "warnings": warnings,
+        "duration_ms": duration,
+        "model": MODEL,
+    }
+
+
+# ==========================================
+# 5. ENDPOINT DE CHAT (NOVO)
+# ==========================================
+class ChatRequest(BaseModel):
+    message: str
+
+
+@app.post("/api/chat")
+async def chat_with_ollama(req: ChatRequest):
+    prompt = f"""Você é o Atlas, um assistente corporativo sênior especialista em modernização de sistemas (COBOL para Java).
+Você é direto, educado e focado em resolver problemas técnicos.
+Responda à mensagem do usuário abaixo de forma clara e curta.
+
+Mensagem do usuário: {req.message}
+"""
+    payload = {
+        "model": MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": 0.3},
+    }
+
+    try:
+        response = requests.post(OLLAMA_URL, json=payload, timeout=TIMEOUT_SEC)
+        response.raise_for_status()
+        llm_raw = response.json().get("response", "")
+
+        return {"response": llm_raw.strip()}
+    except Exception as e:
+        return {
+            "response": f"Desculpe, meu cérebro (Ollama) está offline. Erro: {str(e)}"
+        }
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    print("🚀 Atlas API v2.0 (FastAPI) rodando na porta 8000!")
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+# FIM DO ARQUIVO - COPIE ATÉ AQUI
