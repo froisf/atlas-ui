@@ -1,0 +1,103 @@
+
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <title>Atlas Agentic - Dashboard GTM v5.6</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <style>
+            :root { --bg: #0f172a; --panel: #1e293b; --text: #f8fafc; --accent: #38bdf8; --success: #22c55e; --warning: #f59e0b; --danger: #ef4444; }
+            body { background-color: var(--bg); color: var(--text); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 20px; }
+            .header { text-align: center; margin-bottom: 30px; }
+            .header h1 { margin: 0; color: var(--accent); }
+            .header p { color: #94a3b8; }
+            .kpi-container { display: flex; justify-content: space-around; margin-bottom: 40px; flex-wrap: wrap; gap: 20px; }
+            .kpi-card { background: var(--panel); padding: 20px; border-radius: 12px; text-align: center; width: 200px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); border-top: 4px solid var(--accent); }
+            .kpi-card h3 { margin: 0; font-size: 14px; color: #94a3b8; text-transform: uppercase; }
+            .kpi-card .value { font-size: 36px; font-weight: bold; margin: 10px 0; }
+            .chart-container { background: var(--panel); padding: 20px; border-radius: 12px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); height: 400px; display: flex; justify-content: center; }
+            .charts-row { display: flex; gap: 20px; flex-wrap: wrap; }
+            .chart-box { flex: 1; min-width: 300px; }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>Atlas Agentic - Dashboard GTM</h1>
+            <p>Relatório Executivo de Conversão de Legado (v5.6)</p>
+        </div>
+
+        <div class="kpi-container">
+            <div class="kpi-card">
+                <h3>Total de Programas</h3>
+                <div class="value" style="color: var(--accent);">15</div>
+            </div>
+            <div class="kpi-card" style="border-top-color: var(--success);">
+                <h3>Taxa de Sucesso</h3>
+                <div class="value" style="color: var(--success);">100.0%</div>
+            </div>
+            <div class="kpi-card" style="border-top-color: var(--warning);">
+                <h3>Tempo Médio</h3>
+                <div class="value" style="color: var(--warning);">535.4s</div>
+            </div>
+            <div class="kpi-card">
+                <h3>Total de Chunks</h3>
+                <div class="value" style="color: var(--text);">15</div>
+            </div>
+        </div>
+
+        <div class="charts-row">
+            <div class="chart-container chart-box">
+                <canvas id="statusChart"></canvas>
+            </div>
+            <div class="chart-container chart-box">
+                <canvas id="timeChart"></canvas>
+            </div>
+        </div>
+
+        <script>
+            const programs = ["CFC018", "a", "cfc018", "commit-rollback", "connect-disconnect", "declare", "delete", "fetch", "insert", "open-close", "other-sql", "prepare-execute", "select", "test", "update"];
+            const durations = [63.833, 131.795, 800.919, 861.732, 415.45, 464.551, 573.209, 569.708, 797.669, 392.03, 694.456, 895.51, 581.337, 194.173, 594.478];
+            const chunksData = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+
+            // Gráfico de Pizza (Status)
+            const ctx1 = document.getElementById('statusChart').getContext('2d');
+            new Chart(ctx1, {
+                type: 'doughnut',
+                data: {
+                    labels: ['1ª Tentativa', 'Auto-Correção', 'Falhas'],
+                    datasets: [{
+                        data: [15, 0, 0],
+                        backgroundColor: ['#22c55e', '#f59e0b', '#ef4444'],
+                        borderWidth: 1
+                    }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { labels: { color: '#f8fafc' } } } }
+            });
+
+            // Gráfico de Barras (Tempo por Programa)
+            const ctx2 = document.getElementById('timeChart').getContext('2d');
+            new Chart(ctx2, {
+                type: 'bar',
+                data: {
+                    labels: programs,
+                    datasets: [{
+                        label: 'Tempo (s)',
+                        data: durations,
+                        backgroundColor: '#38bdf8',
+                        borderRadius: 4
+                    }]
+                },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false,
+                    scales: { 
+                        y: { ticks: { color: '#94a3b8' }, grid: { color: '#334155' } },
+                        x: { ticks: { color: '#94a3b8' }, grid: { display: false } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        </script>
+    </body>
+    </html>
+    
