@@ -9,11 +9,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Entity
-@Table(name = "EMPLOYEE")
-class EmployeeEntity {
+@Table(name = "EMP")
+class EmpEntity {
     @Id
-    @Column(name = "EMP_ID")
-    private Integer empId;
+    @Column(name = "EMP_NO")
+    private Integer empNo;
 
     @Column(name = "EMP_NAME")
     private String empName;
@@ -21,12 +21,23 @@ class EmployeeEntity {
     @Column(name = "EMP_SALARY")
     private BigDecimal empSalary;
 
-    public EmployeeEntity(Integer empId, String empName, BigDecimal empSalary) {
-        this.empId = empId; this.empName = empName; this.empSalary = empSalary;
+    public EmpEntity(Integer empNo, String empName, BigDecimal empSalary) {
+        this.empNo = empNo;
+        this.empName = empName;
+        this.empSalary = empSalary;
     }
-    public Integer getEmpId() { return empId; }
-    public String getEmpName() { return empName; }
-    public BigDecimal getEmpSalary() { return empSalary; }
+
+    public Integer getEmpNo() {
+        return empNo;
+    }
+
+    public String getEmpName() {
+        return empName;
+    }
+
+    public BigDecimal getEmpSalary() {
+        return empSalary;
+    }
 }
 
 @Service
@@ -34,10 +45,10 @@ class Insert {
     @Transactional(rollbackFor = Exception.class)
     public void executarLogica() {
         for (int idx = 1; idx <= 10; idx++) {
-            Integer empId = idx; // Assuming TEST-NO is a sequence from 1 to 10
-            String empName = "Employee" + idx; // Assuming TEST-NAME is a sequence of names
-            BigDecimal empSalary = new BigDecimal(idx * 1000); // Assuming TEST-SALARY is a sequence of salaries
-            EmployeeEntity entity = new EmployeeEntity(empId, empName, empSalary);
+            Integer empNo = idx;
+            String empName = "Employee" + idx;
+            BigDecimal empSalary = new BigDecimal(idx * 1000);
+            EmpEntity entity = new EmpEntity(empNo, empName, empSalary);
             // repository.save(entity);
         }
     }

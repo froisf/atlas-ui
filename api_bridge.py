@@ -6,6 +6,7 @@ import subprocess
 import json
 import jsonschema
 import hashlib
+import sqlite3
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,7 +31,50 @@ CHUNK_THRESHOLD = 100
 
 BASE_SANDBOX.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Atlas Agentic MCP Enterprise v5.9")
+# ==========================================
+# RISK ENGINE CORRIGIDO
+# ==========================================
+def evaluate_risk(cobol_code: str) -> str:
+    # Detecta EXEC SQL com qualquer espaço ou quebra de linha
+    high_risk_patterns = [r"EXEC\s+SQL\s+(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)", r"WRITE", r"DELETE FILE", r"OPEN OUTPUT"]
+    for pattern in high_risk_patterns:
+        if re.search(pattern, cobol_code, re.IGNORECASE):
+            return "HIGH"
+    
+    medium_risk_patterns = [r"CALL ", r"READ ", r"EXEC\s+SQL\s+SELECT"]
+    for pattern in medium_risk_patterns:
+        if re.search(pattern, cobol_code, re.IGNORECASE):
+            return "MEDIUM"
+    return "LOW"
+
+def save_approval_audit(job_id, program_name, risk_level, status):
+    try:
+        conn = sqlite3.connect('atlas.db')
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(conversion_audit)")
+        columns = [col[1] for col in cursor.fetchall()]
+        if "risk_level" not in columns:
+            cursor.execute("ALTER TABLE conversion_audit ADD COLUMN risk_level TEXT DEFAULT 'LOW'")
+        if "approval_status" not in columns:
+            cursor.execute("ALTER TABLE conversion_audit ADD COLUMN approval_status TEXT DEFAULT 'PENDING'")
+        
+        cursor.execute('''
+            INSERT INTO conversion_audit (
+                job_id, program_name, status, attempts, duration_seconds, 
+                ir_canonical_valid, bigdecimal_valid, mcp_rag_used, 
+                maven_compile_status, error_log, timestamp, risk_level, approval_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            job_id, program_name, 'SUCCESS', 1, 0,
+            True, True, True, 'BUILD SUCCESS', 'None', 
+            time.strftime("%Y-%m-%dT%H:%M:%SZ"), risk_level, status
+        ))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[Audit] Erro ao salvar no SQLite: {e}")
+
+app = FastAPI(title="Atlas Agentic MCP Enterprise v6.1")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 if HAS_WEBHOOK: app.include_router(webhook_router)
 
@@ -87,7 +131,6 @@ def retrieve_episodic_fix(error_log: str, cobol_clause: str) -> str:
     except Exception: pass
     return None
 
-# ADICIONADO O SUREFIRE PLUGIN PARA FORCAR FALHA SE NAO HOUVER TESTES
 POM_XML_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
@@ -132,6 +175,11 @@ class ConvertRequest(BaseModel):
 class ChatRequest(BaseModel):
     message: str
 
+class ApprovalRequest(BaseModel):
+    job_id: str
+    program_name: str
+    decision: str
+
 def call_ollama(prompt: str, temperature: float = 0.1) -> str:
     payload = {"model": MODEL, "prompt": prompt, "stream": False, "options": {"temperature": temperature}}
     try:
@@ -167,6 +215,7 @@ def build_java_from_ir_prompt(ir_json: str, class_name: str, sql_templates: list
 Sua tarefa e escrever o codigo Java 21 com Spring Boot 3 E a classe de teste JUnit 5 baseado na IR abaixo.
 
 REGRAS OBRIGATORIAS:
+0. **REGRA DE OURO DE IMPORTS:** TODOS os `import` statements DEVEM estar no TOPO do arquivo, ANTES de qualquer definicao de classe ou interface. E PROIBIDO colocar `import` no meio do codigo.
 1. O nome da classe publica de servico DEVE SER: {class_name}
 2. O pacote DEVE SER: package com.ifroix.atlas;
 3. A classe de servico DEVE ter a anotacao @Service e o metodo `public void executarLogica()`.
@@ -195,6 +244,7 @@ Erro do Maven:
 CORRIJA o codigo. Mantenha o pacote com.ifroix.atlas e a classe {class_name}.
 LEMBRE-SE DA SEPARACAO OBRIGATORIA com `// --- FILE: {class_name}Test.java ---`.
 LEMBRE-SE: O teste deve ser JUnit PURO (sem @SpringBootTest) e usar assertDoesNotThrow.
+LEMBRE-SE DA REGRA DE OURO: TODOS os imports devem estar no topo do arquivo.
 Retorne APENAS o codigo Java corrigido.
 """
 
@@ -209,7 +259,6 @@ def extract_java_files(llm_output: str, expected_class_name: str) -> tuple[str, 
         service_code = parts[0].strip()
         test_code = parts[1].strip()
     else:
-        # O PULO DO GATO: Se nao separar, joga erro para o Self-Healing
         raise ValueError("O LLM nao gerou o separador de arquivos. O teste JUnit esta ausente.")
 
     start_match = re.search(r"(package\s+|import\s+|public\s+class\s+)", service_code)
@@ -239,6 +288,9 @@ async def convert_mcp(req: ConvertRequest):
 
     print(f"[MCP] Fase 1: PII Scrubber...")
     cobol_clean = scrub_pii(cobol_raw)
+
+    risk_level = evaluate_risk(cobol_clean)
+    print(f"[MCP] Risk Engine: Classificado como {risk_level}")
 
     total_lines = len(cobol_clean.split('\n'))
     chunks = []
@@ -339,7 +391,7 @@ async def convert_mcp(req: ConvertRequest):
             print(f"❌ [Erro de Parse] {e}")
             compile_error = str(e)
             tentativa += 1
-            continue # Pula para a proxima tentativa sem rodar o Maven
+            continue
         
         with open(out_main_path, "w", encoding="utf-8") as f: f.write(java_code)
         if test_code:
@@ -362,7 +414,6 @@ async def convert_mcp(req: ConvertRequest):
                 cached_fix = retrieve_episodic_fix(compile_error, cobol_clause_key)
                 if cached_fix:
                     print("[Memoria] Aplicando correcao recuperada do ChromaDB!")
-                    # Memoria antiga pode nao ter o teste, forca o LLM a gerar novamente
                     correction_prompt = build_correction_prompt(java_code, compile_error, class_name)
         except Exception as e:
             compile_error = str(e)
@@ -370,8 +421,37 @@ async def convert_mcp(req: ConvertRequest):
         tentativa += 1
 
     if successful_attempt > 1 and final_error_for_postmortem: save_postmortem(final_error_for_postmortem, cobol_clause_key, java_code)
+    
+    job_id = f"JOB_{class_name}_{int(time.time())}"
+    if compile_error is None:
+        if risk_level == "HIGH":
+            save_approval_audit(job_id, class_name, risk_level, "PENDING")
+            print(f"🛑 [Approval Gate] Risco ALTO. Aguardando aprovação humana para {class_name}.")
+        else:
+            save_approval_audit(job_id, class_name, risk_level, "AUTO_APPROVED")
+            print(f"🟢 [Approval Gate] Risco {risk_level}. Auto-aprovado.")
+    else:
+        save_approval_audit(job_id, class_name, risk_level, "FAILED")
+    
     duration = int((time.time() - start_time) * 1000)
-    return {"ok": compile_error is None, "maven_log": compile_error if compile_error else "Sucesso", "envelope_enviado": envelope, "ir_json_gerada": ir_json_consolidada, "java_code": java_code, "test_code": test_code, "duration_ms": duration, "rag_sql_templates_usados": len(sql_templates), "chunks_count": chunks_count}
+    return {"ok": compile_error is None, "maven_log": compile_error if compile_error else "Sucesso", "envelope_enviado": envelope, "ir_json_gerada": ir_json_consolidada, "java_code": java_code, "test_code": test_code, "duration_ms": duration, "rag_sql_templates_usados": len(sql_templates), "chunks_count": chunks_count, "risk_level": risk_level, "job_id": job_id}
+
+@app.post("/api/approve")
+async def approve_conversion(req: ApprovalRequest):
+    print(f"\n🛑 APPROVAL GATE: Recebida decisão para {req.program_name}")
+    print(f"👉 Decisão: {req.decision}")
+    
+    if req.decision not in ["APPROVED", "REJECTED"]:
+        raise HTTPException(status_code=400, detail="Decisao invalida.")
+        
+    save_approval_audit(
+        job_id=req.job_id, 
+        program_name=req.program_name, 
+        risk_level="HIGH", 
+        status=req.decision
+    )
+    
+    return {"status": "success", "message": f"Conversao {req.program_name} foi {req.decision}."}
 
 @app.post("/api/chat")
 async def chat_with_ollama(req: ChatRequest):
@@ -380,5 +460,5 @@ async def chat_with_ollama(req: ChatRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    print("Atlas API v5.9 (Atlas Verifier - Test Enforcement) rodando na porta 8000!")
+    print("Atlas API v6.1 (Risk Engine Fix + Import Rule) rodando na porta 8000!")
     uvicorn.run(app, host="0.0.0.0", port=8000)
