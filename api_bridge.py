@@ -30,7 +30,7 @@ CHUNK_THRESHOLD = 100
 
 BASE_SANDBOX.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Atlas Agentic MCP Enterprise v5.7")
+app = FastAPI(title="Atlas Agentic MCP Enterprise v5.8")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 if HAS_WEBHOOK: app.include_router(webhook_router)
 
@@ -87,7 +87,6 @@ def retrieve_episodic_fix(error_log: str, cobol_clause: str) -> str:
     except Exception: pass
     return None
 
-# NOVO POM COM JUNIT
 POM_XML_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
@@ -105,7 +104,6 @@ POM_XML_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter</artifactId></dependency>
         <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-data-jpa</artifactId></dependency>
         <dependency><groupId>com.h2database</groupId><artifactId>h2</artifactId><scope>runtime</scope></dependency>
-        <!-- ATLAS VERIFIER: DEPENDENCIA DE TESTES -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
@@ -161,8 +159,11 @@ REGRAS OBRIGATORIAS:
 2. O pacote DEVE SER: package com.ifroix.atlas;
 3. A classe de servico DEVE ter a anotacao @Service e o metodo `public void executarLogica()`.
 4. E ESTRITAMENTE PROIBIDO criar o metodo `public static void main`.
-5. **ATLAS VERIFIER:** Voce DEVE criar uma segunda classe de teste chamada `{class_name}Test` anotada com `@SpringBootTest` (ou JUnit puro). O teste deve instanciar a classe principal e chamar o `executarLogica()` para garantir que nao lanca excecoes.
-6. **SEPARACAO DE ARQUIVOS:** Use EXATAMENTE a string `// --- FILE: {class_name}Test.java ---` para separar o arquivo de servico do arquivo de teste. O conteudo antes dessa string sera o arquivo de servico. O conteudo depois sera o arquivo de teste.
+5. **ATLAS VERIFIER (JUNIT PURO):** Voce DEVE criar uma segunda classe de teste chamada `{class_name}Test`.
+   - E ESTRITAMENTE PROIBIDO usar `@SpringBootTest` ou carregar o contexto do Spring. Use APENAS JUnit 5 puro.
+   - O teste deve instanciar a classe principal manualmente (`{class_name} obj = new {class_name}();`) e chamar o metodo `obj.executarLogica()` dentro de `assertDoesNotThrow(() -> obj.executarLogica());`.
+   - Importe `org.junit.jupiter.api.Test;` e `org.junit.jupiter.api.Assertions.*`.
+6. **SEPARACAO DE ARQUIVOS:** Use EXATAMENTE a string `// --- FILE: {class_name}Test.java ---` para separar o arquivo de servico do arquivo de teste.
 7. **REGRA DE ARQUIVO UNICO:** No arquivo de servico, declare TODAS as classes (Entity, Repository) no mesmo arquivo, sem `public`, e PROIBIDO importar com.ifroix.atlas.entity.* ou repository.*.
 8. MATRIZ DE TIPOS: PIC S9(04) -> Integer, PIC S9(X)V99 -> BigDecimal, PIC X -> String.
 9. TRANSACOES: COMMIT/ROLLBACK exigem @Transactional(rollbackFor = Exception.class).
@@ -181,42 +182,36 @@ Erro do Maven:
 {compile_error}
 CORRIJA o codigo. Mantenha o pacote com.ifroix.atlas e a classe {class_name}.
 LEMBRE-SE DA SEPARACAO DE ARQUIVOS com `// --- FILE: {class_name}Test.java ---`.
+LEMBRE-SE: O teste deve ser JUnit PURO (sem @SpringBootTest) e usar assertDoesNotThrow.
 Retorne APENAS o codigo Java corrigido.
 """
 
 def extract_java_files(llm_output: str, expected_class_name: str) -> tuple[str, str, list[str]]:
     warnings = []
-    # Limpa o markdown
     match = re.search(r"```(?:java|markdown)?\s*(.*?)```", llm_output, re.DOTALL | re.IGNORECASE)
     raw_code = match.group(1).strip() if match else llm_output.strip()
     
-    # Verifica a separacao
     separator = f"// --- FILE: {expected_class_name}Test.java ---"
     if separator in raw_code:
         parts = raw_code.split(separator)
         service_code = parts[0].strip()
         test_code = parts[1].strip()
     else:
-        warnings.append("Atencao: O LLM nao separou o arquivo de teste. Salvando apenas o servico.")
+        warnings.append("Atencao: O LLM nao separou o arquivo de teste.")
         service_code = raw_code
         test_code = ""
 
-    # Limpeza do Service
     start_match = re.search(r"(package\s+|import\s+|public\s+class\s+)", service_code)
     if start_match: service_code = service_code[start_match.start():]
     fim = service_code.rfind("}")
     if fim != -1: service_code = service_code[:fim+1]
 
-    # Limpeza do Test
     if test_code:
         start_test = re.search(r"(package\s+|import\s+|public\s+class\s+)", test_code)
         if start_test: test_code = test_code[start_test.start():]
         fim_test = test_code.rfind("}")
         if fim_test != -1: test_code = test_code[:fim_test+1]
 
-    if f"class {expected_class_name}" not in service_code:
-        warnings.append(f"Atencao: A classe nao se chama {expected_class_name}.")
-    
     return service_code, test_code, warnings
 
 def remove_main_method(java_code: str) -> str:
@@ -295,7 +290,6 @@ async def convert_mcp(req: ConvertRequest):
     try: validate_ir(ir_json_consolidada); print("JSON Schema validado com sucesso!")
     except ValueError as e: raise HTTPException(status_code=422, detail=str(e))
 
-    # Cria a estrutura de pastas para Main e Test
     program_dir = BASE_SANDBOX / req.cliente / Path(req.arquivo).stem
     main_pkg_dir = program_dir / "src" / "main" / "java" / "com" / "ifroix" / "atlas"
     test_pkg_dir = program_dir / "src" / "test" / "java" / "com" / "ifroix" / "atlas"
@@ -337,7 +331,6 @@ async def convert_mcp(req: ConvertRequest):
         print(f"[MCP] Fase 7: Maven Test (Tentativa {tentativa})...")
         compile_error = None
         try:
-            # O COMANDO AGORA E MVN CLEAN TEST
             try: result = subprocess.run(["mvn", "clean", "test"], cwd=program_dir, capture_output=True, text=True, timeout=TIMEOUT_SEC)
             except FileNotFoundError: result = subprocess.run([r"C:\apache-maven-3.9.16\bin\mvn.cmd", "clean", "test"], cwd=program_dir, capture_output=True, text=True, timeout=TIMEOUT_SEC)
             
@@ -352,10 +345,8 @@ async def convert_mcp(req: ConvertRequest):
                 cached_fix = retrieve_episodic_fix(compile_error, cobol_clause_key)
                 if cached_fix:
                     print("[Memoria] Aplicando correcao recuperada do ChromaDB!")
-                    # A memoria so tem o codigo principal, precisa rodar o loop de novo
-                else:
+                    # Memoria antiga pode nao ter o teste, forca o LLM a gerar novamente
                     correction_prompt = build_correction_prompt(java_code, compile_error, class_name)
-                    # O proximo loop vai corrigir
         except Exception as e:
             compile_error = str(e)
             break
@@ -372,5 +363,5 @@ async def chat_with_ollama(req: ChatRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    print("Atlas API v5.7 (Atlas Verifier) rodando na porta 8000!")
+    print("Atlas API v5.8 (Atlas Verifier - JUnit Puro) rodando na porta 8000!")
     uvicorn.run(app, host="0.0.0.0", port=8000)
