@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "maven_log": "Sucesso",
+  "envelope_enviado": {
+    "envelope_version": "1.0.0",
+    "metadata": {
+      "program_name": "A",
+      "source_language": "COBOL",
+      "tenant_id": "CLIENTE_PILOTO",
+      "timestamp": "2026-11-16T06:19:04Z"
+    },
+    "security_compliance": {
+      "pii_scrubbed": true,
+      "scrubbing_engine": "iFroix_PII_Scrubber_v2",
+      "scrubbed_tokens_count": 1
+    },
+    "payload": {
+      "source_code_clean": "\ufeff       IDENTIFICATION DIVISION.\n       PROGRAM-ID. HELLO-WORLD.\n       PROCEDURE DIVISION.\n           DISPLAY 'HELLO, ATLAS AGENTIC!'.\n           STOP RUN.\n"
+    },
+    "external_context": {
+      "called_programs": [],
+      "database_tables": [],
+      "sql_rag_templates": []
+    },
+    "target_contract": {
+      "output_format": "JSON_IR_CANONICAL_V1",
+      "strict_validation": true,
+      "additional_properties_allowed": false
+    }
+  },
+  "ir_json_gerada": "{\n  \"program_id\": \"HELLO-WORLD\",\n  \"variaveis\": [],\n  \"fluxo\": [\"DISPLAY 'HELLO, ATLAS AGENTIC!'\", \"STOP RUN\"]\n}",
+  "java_code": "package com.ifroix.atlas;\n\nimport org.springframework.stereotype.Service;\nimport org.springframework.transaction.annotation.Transactional;\n\n@Service\npublic class A {\n\n    public void executarLogica() {\n        System.out.println(\"HELLO, ATLAS AGENTIC!\");\n    }\n}",
+  "duration_ms": 131795,
+  "rag_sql_templates_usados": 0
+}

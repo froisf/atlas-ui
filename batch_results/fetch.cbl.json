@@ -1,0 +1,65 @@
+{
+  "ok": true,
+  "maven_log": "Sucesso",
+  "envelope_enviado": {
+    "envelope_version": "1.0.0",
+    "metadata": {
+      "program_name": "Fetch",
+      "source_language": "COBOL",
+      "tenant_id": "CLIENTE_PILOTO",
+      "timestamp": "2026-11-16T07:23:16Z"
+    },
+    "security_compliance": {
+      "pii_scrubbed": true,
+      "scrubbing_engine": "iFroix_PII_Scrubber_v2",
+      "scrubbed_tokens_count": 1
+    },
+    "payload": {
+      "source_code_clean": "       IDENTIFICATION              DIVISION.\n      ******************************************************************\n       PROGRAM-ID.                 prog.\n      ******************************************************************\n       DATA                        DIVISION.\n      ******************************************************************\n       WORKING-STORAGE             SECTION.\n       01  TEST-DATA.\n         03 FILLER       PIC X(28) VALUE \"0001\ufffdk\ufffdC\ufffd@\ufffd\ufffd\ufffdY          0400\".\n         03 FILLER       PIC X(28) VALUE \"0002\ufffd\u0090X\ufffd@\ufffd\ufffd\ufffdY          0350\".\n         03 FILLER       PIC X(28) VALUE \"0003\ufffdH\ufffdc\ufffd@\ufffdO\ufffdY          0300\".\n         03 FILLER       PIC X(28) VALUE \"0004\ufffd\ufffd\ufffd@\ufffdl\ufffdY          025p\".\n         03 FILLER       PIC X(28) VALUE \"0005\ufffd{\ufffd\ufffd@\ufffd\u0718Y          020p\".\n         03 FILLER       PIC X(28) VALUE \"0006\ufffd\ufffd\ufffd\ufffd\ufffd@\ufffdZ\ufffdY          0150\".\n         03 FILLER       PIC X(28) VALUE \"0007\ufffd\u0216\u0601@\ufffd\ufffd\ufffdY          010p\".\n         03 FILLER       PIC X(28) VALUE \"0008\ufffd\ufffd\ufffd@\ufffd\ufffd\ufffdY          0050\".\n         03 FILLER       PIC X(28) VALUE \"0009\ufffdQ\ufffdn\ufffd@\ufffd\ufffdY          020p\".\n         03 FILLER       PIC X(28) VALUE \"0010\ufffd\ufffd\u0281@\ufffd\\\ufffdY          0350\".\n\n       01  TEST-DATA-R   REDEFINES TEST-DATA.\n         03  TEST-TBL    OCCURS  10.\n           05  TEST-NO             PIC S9(04).\n           05  TEST-NAME           PIC  X(20) .\n           05  TEST-SALARY         PIC S9(04).\n       01  IDX                     PIC  9(02).\n       01 TEST-CASE-COUNT PIC 9999 VALUE 1.\n\n       EXEC SQL BEGIN DECLARE SECTION END-EXEC.\n       01  DBNAME                  PIC  X(30) VALUE SPACE.\n       01  USERNAME                PIC  X(30) VALUE SPACE.\n       01  PASSWD                  PIC  X(10) VALUE SPACE.\n\n       01  EMP-REC-VARS.\n         03  EMP-NO                PIC S9(04) VALUE ZERO.\n         03  EMP-NAME              PIC  X(20) .\n         03  EMP-SALARY            PIC S9(04) VALUE ZERO.\n       EXEC SQL END DECLARE SECTION END-EXEC.\n\n       EXEC SQL INCLUDE SQLCA END-EXEC.\n      ******************************************************************\n       PROCEDURE                   DIVISION.\n      ******************************************************************\n       MAIN-RTN.\n           \n       PERFORM SETUP-DB.\n\n           EXEC SQL \n               FETCH C1 INTO :EMP-NO, :EMP-NAME, :EMP-SALARY\n           END-EXEC.\n           PERFORM UNTIL SQLCODE NOT = ZERO\n              DISPLAY EMP-NO \", \" EMP-NAME \", \" EMP-SALARY\n              EXEC SQL \n                  FETCH C1 INTO :EMP-NO, :EMP-NAME, :EMP-SALARY\n              END-EXEC\n           END-PERFORM.\n\n       PERFORM CLEANUP-DB.\n\n      *    END\n           STOP RUN.\n\n      ******************************************************************\n       SETUP-DB.\n      ******************************************************************\n\n      *    SERVER\n           MOVE  \"<|DB_NAME|>@<|DB_HOST|>:<|DB_PORT|>\"\n             TO DBNAME.\n           MOVE  \"<|DB_USER|>\"\n             TO USERNAME.\n           MOVE  \"<|DB_PASSWORD|>\"\n             TO PASSWD.\n\n           EXEC SQL\n               CONNECT :USERNAME IDENTIFIED BY :PASSWD USING :DBNAME \n           END-EXEC.\n\n           EXEC SQL\n               DROP TABLE IF EXISTS EMP\n           END-EXEC.\n\n           EXEC SQL\n                CREATE TABLE EMP\n                (\n                    EMP_NO     NUMERIC(4,0) NOT NULL,\n                    EMP_NAME   CHAR(20),\n                    EMP_SALARY NUMERIC(4,0),\n                    CONSTRAINT IEMP_0 PRIMARY KEY (EMP_NO)\n                )\n           END-EXEC.\n\n      *    INSERT ROWS USING HOST VARIABLE\n           PERFORM VARYING IDX FROM 1 BY 1 UNTIL IDX > 10\n              MOVE TEST-NO(IDX)     TO  EMP-NO\n              MOVE TEST-NAME(IDX)   TO  EMP-NAME\n              MOVE TEST-SALARY(IDX) TO  EMP-SALARY\n              EXEC SQL\n                 INSERT INTO EMP VALUES\n                        (:EMP-NO,:EMP-NAME,:EMP-SALARY)\n              END-EXEC\n           END-PERFORM.\n      *    DECLARE CURSOR\n           EXEC SQL \n               DECLARE C1 CURSOR FOR\n               SELECT EMP_NO, EMP_NAME, EMP_SALARY \n                      FROM EMP\n                      ORDER BY EMP_NO\n           END-EXEC.\n      *    OPEN CURSOR\n           EXEC SQL\n               OPEN C1\n           END-EXEC.\n\n      ******************************************************************\n       CLEANUP-DB.\n      ******************************************************************\n           EXEC SQL\n               CLOSE C1\n           END-EXEC.\n\n           EXEC SQL\n               DROP TABLE IF EXISTS EMP\n           END-EXEC.\n\n           EXEC SQL\n               DISCONNECT ALL\n           END-EXEC.\n\n      ******************************************************************\n       DISPLAY-TEST-RESULT.\n      ******************************************************************\n           IF  SQLCODE = ZERO\n             THEN\n\n               DISPLAY \"<log> test case \" TEST-CASE-COUNT \": success\"\n               ADD 1 TO TEST-CASE-COUNT\n\n             ELSE\n               DISPLAY \"*** SQL ERROR ***\"\n               DISPLAY \"SQLCODE: \" SQLCODE \" \" NO ADVANCING\n               EVALUATE SQLCODE\n                  WHEN  +10\n                     DISPLAY \"Record not found\"\n                  WHEN  -01\n                     DISPLAY \"Connection falied\"\n                  WHEN  -20\n                     DISPLAY \"Internal error\"\n                  WHEN  -30\n                     DISPLAY \"PostgreSQL error\"\n                     DISPLAY \"ERRCODE: \"  SQLSTATE\n                     DISPLAY SQLERRMC\n                  *> TO RESTART TRANSACTION, DO ROLLBACK.\n                     EXEC SQL\n                         ROLLBACK\n                     END-EXEC\n                  WHEN  OTHER\n                     DISPLAY \"Undefined error\"\n                     DISPLAY \"ERRCODE: \"  SQLSTATE\n                     DISPLAY SQLERRMC\n               END-EVALUATE\n               STOP RUN.\n      ******************************************************************  \n\n"
+    },
+    "external_context": {
+      "called_programs": [],
+      "database_tables": [
+        {
+          "table_name": "ORDER_ITEMS",
+          "columns": [
+            {
+              "name": "ORDER_ITEM_ID",
+              "type": "INTEGER",
+              "is_pk": true
+            },
+            {
+              "name": "ITEM_PRICE",
+              "type": "DECIMAL",
+              "precision": 15,
+              "scale": 2
+            }
+          ]
+        }
+      ],
+      "sql_rag_templates": [
+        {
+          "pattern_id": "DB2_ENTITY_JPA",
+          "golden_standard_code": "package com.ifroix.atlas.entity;\n\nimport jakarta.persistence.Entity;\nimport jakarta.persistence.Id;\nimport jakarta.persistence.Table;\nimport jakarta.persistence.Column;\nimport java.math.BigDecimal;\n\n@Entity\n@Table(name = \"EMPLOYEE\")\nclass EmployeeEntity {\n    @Id\n    @Column(name = \"EMP_ID\")\n    private Integer empId;\n\n    @Column(name = \"EMP_NAME\")\n    private String empName;\n\n    @Column(name = \"EMP_SALARY\")\n    private BigDecimal empSalary;\n\n    public EmployeeEntity(Integer empId, String empName, BigDecimal empSalary) {\n        this.empId = empId; this.empName = empName; this.empSalary = empSalary;\n    }\n    public Integer getEmpId() { return empId; }\n    public String getEmpName() { return empName; }\n    public BigDecimal getEmpSalary() { return empSalary; }\n}"
+        },
+        {
+          "pattern_id": "DB2_INSERT",
+          "golden_standard_code": "package com.ifroix.atlas.service;\n\nimport org.springframework.stereotype.Service;\nimport org.springframework.transaction.annotation.Transactional;\nimport java.math.BigDecimal;\n\n@Service\nclass EmployeeService {\n    @Transactional\n    public void insertEmployee(Integer empId, String empName, BigDecimal salary) {\n        EmployeeEntity entity = new EmployeeEntity(empId, empName, salary);\n        // repository.save(entity);\n    }\n}"
+        },
+        {
+          "pattern_id": "DB2_COMMIT_ROLLBACK",
+          "golden_standard_code": "package com.ifroix.atlas.service;\n\nimport org.springframework.stereotype.Service;\nimport org.springframework.transaction.annotation.Transactional;\n\n@Service\nclass TransactionService {\n    @Transactional(rollbackFor = Exception.class)\n    public void executeTransaction() {\n        // O Spring gerencia COMMIT e ROLLBACK automaticamente aqui\n    }\n}"
+        }
+      ]
+    },
+    "target_contract": {
+      "output_format": "JSON_IR_CANONICAL_V1",
+      "strict_validation": true,
+      "additional_properties_allowed": false
+    }
+  },
+  "ir_json_gerada": "{\n  \"program_id\": \"prog\",\n  \"variaveis\": [\n    {\n      \"name\": \"TEST-DATA\",\n      \"type\": \"WORKING-STORAGE\"\n    },\n    {\n      \"name\": \"TEST-DATA-R\",\n      \"type\": \"WORKING-STORAGE\"\n    },\n    {\n      \"name\": \"IDX\",\n      \"type\": \"PIC 9(02)\"\n    },\n    {\n      \"name\": \"TEST-CASE-COUNT\",\n      \"type\": \"PIC 9999\"\n    },\n    {\n      \"name\": \"DBNAME\",\n      \"type\": \"PIC X(30)\"\n    },\n    {\n      \"name\": \"USERNAME\",\n      \"type\": \"PIC X(30)\"\n    },\n    {\n      \"name\": \"PASSWD\",\n      \"type\": \"PIC X(10)\"\n    },\n    {\n      \"name\": \"EMP-REC-VARS\",\n      \"type\": \"WORKING-STORAGE\"\n    },\n    {\n      \"name\": \"EMP-NO\",\n      \"type\": \"PIC S9(04)\"\n    },\n    {\n      \"name\": \"EMP-NAME\",\n      \"type\": \"PIC X(20)\"\n    },\n    {\n      \"name\": \"EMP-SALARY\",\n      \"type\": \"PIC S9(04)\"\n    }\n  ],\n  \"fluxo\": [\n    \"SETUP-DB\",\n    \"DECLARE C1 CURSOR FOR SELECT EMP_NO, EMP_NAME, EMP_SALARY FROM EMP ORDER BY EMP_NO\",\n    \"OPEN C1\",\n    \"FETCH C1 INTO EMP-NO, EMP-NAME, EMP-SALARY\",\n    \"DISPLAY EMP-NO, EMP-NAME, EMP-SALARY\",\n    \"CLOSE C1\",\n    \"DROP TABLE IF EXISTS EMP\",\n    \"DISCONNECT ALL\",\n    \"DISPLAY-TEST-RESULT\"\n  ]\n}",
+  "java_code": "package com.ifroix.atlas;\n\nimport org.springframework.stereotype.Service;\nimport org.springframework.transaction.annotation.Transactional;\nimport org.springframework.beans.factory.annotation.Autowired;\nimport org.springframework.jdbc.core.JdbcTemplate;\nimport java.math.BigDecimal;\n\n@Service\nclass Fetch {\n    @Autowired\n    private JdbcTemplate jdbcTemplate;\n\n    @Transactional(rollbackFor = Exception.class)\n    public void executarLogica() {\n        String tableName = \"EMP\";\n        String selectQuery = \"SELECT EMP_NO, EMP_NAME, EMP_SALARY FROM EMP ORDER BY EMP_NO\";\n        jdbcTemplate.query(selectQuery, (rs, rowNum) -> {\n            Integer empNo = rs.getInt(\"EMP_NO\");\n            String empName = rs.getString(\"EMP_NAME\");\n            BigDecimal empSalary = new BigDecimal(rs.getString(\"EMP_SALARY\"));\n            System.out.println(\"EMP_NO: \" + empNo + \", EMP_NAME: \" + empName + \", EMP_SALARY: \" + empSalary);\n            return null;\n        });\n\n        String dropTableQuery = \"DROP TABLE IF EXISTS EMP\";\n        jdbcTemplate.execute(dropTableQuery);\n    }\n}\n\nclass EmployeeEntity {\n    private Integer empNo;\n    private String empName;\n    private BigDecimal empSalary;\n\n    public EmployeeEntity(Integer empNo, String empName, BigDecimal empSalary) {\n        this.empNo = empNo;\n        this.empName = empName;\n        this.empSalary = empSalary;\n    }\n\n    public Integer getEmpNo() {\n        return empNo;\n    }\n\n    public String getEmpName() {\n        return empName;\n    }\n\n    public BigDecimal getEmpSalary() {\n        return empSalary;\n    }\n}",
+  "duration_ms": 569708,
+  "rag_sql_templates_usados": 3
+}

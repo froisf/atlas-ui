@@ -1,0 +1,65 @@
+{
+  "ok": true,
+  "maven_log": "Sucesso",
+  "envelope_enviado": {
+    "envelope_version": "1.0.0",
+    "metadata": {
+      "program_name": "Cfc018",
+      "source_language": "COBOL",
+      "tenant_id": "CLIENTE_PILOTO",
+      "timestamp": "2026-11-16T06:21:17Z"
+    },
+    "security_compliance": {
+      "pii_scrubbed": true,
+      "scrubbing_engine": "iFroix_PII_Scrubber_v2",
+      "scrubbed_tokens_count": 1
+    },
+    "payload": {
+      "source_code_clean": "\ufeff       IDENTIFICATION DIVISION.\n       PROGRAM-ID. CFC018.\n       ENVIRONMENT DIVISION.\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01 WS-ORDER-REC.\n          05 ORDER-ID PIC 9(9).\n          05 TOTAL-AMT PIC 9(15)V99.\n       PROCEDURE DIVISION.\n           EXEC SQL SELECT * FROM ORDER_ITEMS END-EXEC.\n           CALL '[STRING_MASKED]' USING WS-ORDER-REC.\n           DISPLAY '[STRING_MASKED]'.\n           STOP RUN.\n"
+    },
+    "external_context": {
+      "called_programs": [],
+      "database_tables": [
+        {
+          "table_name": "ORDER_ITEMS",
+          "columns": [
+            {
+              "name": "ORDER_ITEM_ID",
+              "type": "INTEGER",
+              "is_pk": true
+            },
+            {
+              "name": "ITEM_PRICE",
+              "type": "DECIMAL",
+              "precision": 15,
+              "scale": 2
+            }
+          ]
+        }
+      ],
+      "sql_rag_templates": [
+        {
+          "pattern_id": "DB2_ENTITY_JPA",
+          "golden_standard_code": "package com.ifroix.atlas.entity;\n\nimport jakarta.persistence.Entity;\nimport jakarta.persistence.Id;\nimport jakarta.persistence.Table;\nimport jakarta.persistence.Column;\nimport java.math.BigDecimal;\n\n@Entity\n@Table(name = \"EMPLOYEE\")\nclass EmployeeEntity {\n    @Id\n    @Column(name = \"EMP_ID\")\n    private Integer empId;\n\n    @Column(name = \"EMP_NAME\")\n    private String empName;\n\n    @Column(name = \"EMP_SALARY\")\n    private BigDecimal empSalary;\n\n    public EmployeeEntity(Integer empId, String empName, BigDecimal empSalary) {\n        this.empId = empId; this.empName = empName; this.empSalary = empSalary;\n    }\n    public Integer getEmpId() { return empId; }\n    public String getEmpName() { return empName; }\n    public BigDecimal getEmpSalary() { return empSalary; }\n}"
+        },
+        {
+          "pattern_id": "DB2_INSERT",
+          "golden_standard_code": "package com.ifroix.atlas.service;\n\nimport org.springframework.stereotype.Service;\nimport org.springframework.transaction.annotation.Transactional;\nimport java.math.BigDecimal;\n\n@Service\nclass EmployeeService {\n    @Transactional\n    public void insertEmployee(Integer empId, String empName, BigDecimal salary) {\n        EmployeeEntity entity = new EmployeeEntity(empId, empName, salary);\n        // repository.save(entity);\n    }\n}"
+        },
+        {
+          "pattern_id": "DB2_COMMIT_ROLLBACK",
+          "golden_standard_code": "package com.ifroix.atlas.service;\n\nimport org.springframework.stereotype.Service;\nimport org.springframework.transaction.annotation.Transactional;\n\n@Service\nclass TransactionService {\n    @Transactional(rollbackFor = Exception.class)\n    public void executeTransaction() {\n        // O Spring gerencia COMMIT e ROLLBACK automaticamente aqui\n    }\n}"
+        }
+      ]
+    },
+    "target_contract": {
+      "output_format": "JSON_IR_CANONICAL_V1",
+      "strict_validation": true,
+      "additional_properties_allowed": false
+    }
+  },
+  "ir_json_gerada": "{\n  \"program_id\": \"Cfc018\",\n  \"variaveis\": [\n    {\n      \"name\": \"ORDER-ID\",\n      \"type\": \"INTEGER\"\n    },\n    {\n      \"name\": \"TOTAL-AMT\",\n      \"type\": \"DECIMAL\"\n    }\n  ],\n  \"fluxo\": [\n    \"EXEC SQL SELECT * FROM ORDER_ITEMS END-EXEC\",\n    \"CALL '[STRING_MASKED]' USING WS-ORDER-REC\",\n    \"DISPLAY '[STRING_MASKED]'\",\n    \"STOP RUN\"\n  ]\n}",
+  "java_code": "package com.ifroix.atlas;\n\nimport java.math.BigDecimal;\nimport org.springframework.stereotype.Service;\nimport org.springframework.transaction.annotation.Transactional;\n\n@Service\nclass Cfc018 {\n\n    @Transactional(rollbackFor = Exception.class)\n    public void executarLogica() {\n        // Simulando a sele\u00e7\u00e3o de itens de pedido\n        OrderItemsEntity orderItemsEntity = new OrderItemsEntity(1, \"Item 1\", new BigDecimal(\"10.50\"));\n        // Aqui voc\u00ea pode adicionar l\u00f3gica para chamar o servi\u00e7o que simula o CALL '[STRING_MASKED]' USING WS-ORDER-REC\n        // E tamb\u00e9m a l\u00f3gica para exibir '[STRING_MASKED]'\n        // Exemplo de como isso poderia ser feito:\n        // orderItemsService.callMaskedService(orderItemsEntity);\n        // System.out.println(\"[STRING_MASKED]\");\n    }\n}\n\n// Simulando a entidade OrderItemsEntity\nclass OrderItemsEntity {\n    private Integer orderId;\n    private String itemName;\n    private BigDecimal totalAmt;\n\n    public OrderItemsEntity(Integer orderId, String itemName, BigDecimal totalAmt) {\n        this.orderId = orderId;\n        this.itemName = itemName;\n        this.totalAmt = totalAmt;\n    }\n\n    public Integer getOrderId() {\n        return orderId;\n    }\n\n    public String getItemName() {\n        return itemName;\n    }\n\n    public BigDecimal getTotalAmt() {\n        return totalAmt;\n    }\n}",
+  "duration_ms": 800919,
+  "rag_sql_templates_usados": 3
+}

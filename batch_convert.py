@@ -1,78 +1,75 @@
 ﻿import requests
-import time
 from pathlib import Path
-from datetime import datetime
+import time
+import json
+import os
 
-# Configurações
-API_URL = "http://127.0.0.1:8000/api/convert"
+API_URL = "http://127.0.0.1:8000/api/convert_mcp"
 COBOL_ROOT = Path(r"D:\Workspace\01-Products\nw-poc\legacy-cobol")
+BATCH_RESULTS_DIR = Path(os.getcwd()) / "batch_results"
 
-def formatar_tempo(segundos):
-    minutos = int(segundos // 60)
-    seg = int(segundos % 60)
-    return f"{minutos}m {seg}s" if minutos > 0 else f"{seg}s"
 
 def run_batch():
-    cobol_files = sorted(list(COBOL_ROOT.glob("*.cbl")) + list(COBOL_ROOT.glob("*.CBL")))
+    BATCH_RESULTS_DIR.mkdir(exist_ok=True)
+
+    # CORREÇÃO: Filtra todos os arquivos e remove duplicatas ignorando maiúsculas/minúsculas
+    unique_files = {}
+    for f in COBOL_ROOT.glob("*"):
+        if f.suffix.lower() == ".cbl":
+            unique_files[f.name.lower()] = f
+
+    cobol_files = sorted(list(unique_files.values()), key=lambda x: x.name.lower())
     total_arquivos = len(cobol_files)
-    
+
     if total_arquivos == 0:
-        print("❌ Nenhum arquivo COBOL encontrado.")
+        print("Nenhum arquivo COBOL encontrado.")
         return
 
-    hora_inicio = datetime.now()
-    print("=" * 60)
-    print("🚀 MIGRAÇÃO EM MASSA - ATLAS AGENTIC")
-    print("=" * 60)
-    print(f"📂 Pasta: {COBOL_ROOT}")
-    print(f"📊 Programas encontrados: {total_arquivos}")
-    print(f"⏱️  Hora de Início: {hora_inicio.strftime('%H:%M:%S')}")
-    print("-" * 60)
+    print(f"Iniciando lote de {total_arquivos} arquivos UNICOS na esteira MCP...")
 
     stats = {"sucesso_1a": 0, "sucesso_autocorrecao": 0, "falha": 0}
-    tempo_inicio_loop = time.time()
-    
+
     for idx, file in enumerate(cobol_files, 1):
         filename = file.name
-        progresso = f"[{idx}/{total_arquivos}] Processando {filename:<20}"
-        print(f"\r{progresso}", end="", flush=True)
-        
+        print(f"[{idx}/{total_arquivos}] Processando {filename}...", end="", flush=True)
+
         try:
-            res = requests.post(API_URL, json={"arquivo": filename}, timeout=300)
-            
+            res = requests.post(API_URL, json={"arquivo": filename}, timeout=1200)
+
             if res.status_code == 200:
                 dados = res.json()
-                tentativas = dados.get("tentativas", 1)
-                erro = dados.get("compile_error")
-                
-                if erro:
-                    stats["falha"] += 1
-                    print(f"\r❌ [{idx}/{total_arquivos}] {filename:<20} (Falhou)")
-                elif tentativas == 1:
-                    stats["sucesso_1a"] += 1
-                else:
-                    stats["sucesso_autocorrecao"] += 1
-            else:
-                stats["falha"] += 1
-                print(f"\r❌ [{idx}/{total_arquivos}] {filename:<20} (Erro API)")
-                
-        except Exception as e:
-            stats["falha"] += 1
-            print(f"\r❌ [{idx}/{total_arquivos}] {filename:<20} (Erro Conexão)")
 
-    hora_fim = datetime.now()
-    tempo_total = time.time() - tempo_inicio_loop
-    
-    print("\n" + "=" * 60)
-    print("📊 RELATÓRIO FINAL DA MIGRAÇÃO")
-    print("=" * 60)
-    print(f"⏱️  Hora de Término: {hora_fim.strftime('%H:%M:%S')}")
-    print(f"⏳ Tempo Total Gasto: {formatar_tempo(tempo_total)}")
-    print("-" * 60)
-    print(f"✅ Sucesso de primeira:       {stats['sucesso_1a']} arquivos")
-    print(f"🟡 Sucesso com auto-correção: {stats['sucesso_autocorrecao']} arquivos")
-    print(f"❌ Falhas:                    {stats['falha']} arquivos")
-    print("=" * 60)
+                with open(
+                    BATCH_RESULTS_DIR / f"{filename}.json", "w", encoding="utf-8"
+                ) as f:
+                    json.dump(dados, f, indent=2)
+
+                if dados.get("ok"):
+                    if dados.get("tentativas", 1) == 1:
+                        print(f" [OK] 1a Tentativa")
+                        stats["sucesso_1a"] += 1
+                    else:
+                        print(f" [OK] Auto-Correcao ({dados.get('tentativas')}x)")
+                        stats["sucesso_autocorrecao"] += 1
+                else:
+                    print(f" [FALHA] Erro de Compilacao")
+                    stats["falha"] += 1
+            else:
+                print(f" [ERRO API] HTTP {res.status_code}: {res.text[:50]}")
+                stats["falha"] += 1
+
+        except Exception as e:
+            print(f" [ERRO CONEXAO] {str(e)}")
+            stats["falha"] += 1
+
+    print("\n" + "=" * 50)
+    print("RELATORIO FINAL")
+    print("=" * 50)
+    print(f"Sucesso 1a Tentativa: {stats['sucesso_1a']}")
+    print(f"Sucesso com Auto-Correcao: {stats['sucesso_autocorrecao']}")
+    print(f"Falhas: {stats['falha']}")
+    print("=" * 50)
+
 
 if __name__ == "__main__":
     run_batch()

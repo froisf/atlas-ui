@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "maven_log": "Sucesso",
+  "envelope_enviado": {
+    "envelope_version": "1.0.0",
+    "metadata": {
+      "program_name": "Test",
+      "source_language": "COBOL",
+      "tenant_id": "CLIENTE_PILOTO",
+      "timestamp": "2026-11-16T08:49:39Z"
+    },
+    "security_compliance": {
+      "pii_scrubbed": true,
+      "scrubbing_engine": "iFroix_PII_Scrubber_v2",
+      "scrubbed_tokens_count": 1
+    },
+    "payload": {
+      "source_code_clean": "      *> COBOL Sample Program\n       IDENTIFICATION DIVISION.\n       PROGRAM-ID. TEST-PROGRAM.\n\n       DATA DIVISION.\n       WORKING-STORAGE SECTION.\n       01 WS-COUNTER          PIC 9(3)    VALUE 0.\n       01 WS-NAME             PIC X(30)   VALUE SPACES.\n       01 WS-FLAG             PIC 9       VALUE 0.\n           88 WS-FLAG-TRUE    VALUE 1.\n           88 WS-FLAG-FALSE   VALUE 0.\n\n       PROCEDURE DIVISION.\n       MAIN-PARAGRAPH.\n           MOVE \"Hello\" TO WS-NAME\n           DISPLAY WS-NAME\n           PERFORM VARYING WS-COUNTER FROM 1 BY 1\n                   UNTIL WS-COUNTER > 10\n               ADD 1 TO WS-COUNTER\n           END-PERFORM\n           IF WS-FLAG = 0\n               DISPLAY \"Flag is zero\"\n           END-IF\n           EVALUATE TRUE\n               WHEN WS-COUNTER = ZERO\n                   DISPLAY \"Counter is zero\"\n               WHEN OTHER\n                   DISPLAY \"Counter is not zero\"\n           END-EVALUATE\n           STOP RUN.\n"
+    },
+    "external_context": {
+      "called_programs": [],
+      "database_tables": [],
+      "sql_rag_templates": []
+    },
+    "target_contract": {
+      "output_format": "JSON_IR_CANONICAL_V1",
+      "strict_validation": true,
+      "additional_properties_allowed": false
+    }
+  },
+  "ir_json_gerada": "{\n  \"program_id\": \"TEST-PROGRAM\",\n  \"variaveis\": [\n    {\"name\": \"WS-COUNTER\", \"type\": \"NUMERIC\"},\n    {\"name\": \"WS-NAME\", \"type\": \"STRING\"},\n    {\"name\": \"WS-FLAG\", \"type\": \"BOOLEAN\"}\n  ],\n  \"fluxo\": [\n    \"MOVE \\\"Hello\\\" TO WS-NAME\",\n    \"DISPLAY WS-NAME\",\n    \"PERFORM VARYING WS-COUNTER FROM 1 BY 1 UNTIL WS-COUNTER > 10\",\n    \"ADD 1 TO WS-COUNTER\",\n    \"IF WS-FLAG = 0 THEN DISPLAY \\\"Flag is zero\\\"\",\n    \"EVALUATE TRUE WHEN WS-COUNTER = 0 THEN DISPLAY \\\"Counter is zero\\\"\",\n    \"EVALUATE TRUE WHEN OTHER THEN DISPLAY \\\"Counter is not zero\\\"\",\n    \"STOP RUN\"\n  ]\n}",
+  "java_code": "package com.ifroix.atlas;\n\nimport org.springframework.stereotype.Service;\nimport org.springframework.transaction.annotation.Transactional;\n\n@Service\npublic class Test {\n\n    public void executarLogica() {\n        Integer wsCounter = 0;\n        String wsName = \"Hello\";\n        boolean wsFlag = false;\n\n        System.out.println(wsName);\n\n        while (wsCounter < 10) {\n            wsCounter++;\n            if (!wsFlag) {\n                System.out.println(\"Flag is zero\");\n            }\n            if (wsCounter == 0) {\n                System.out.println(\"Counter is zero\");\n            } else {\n                System.out.println(\"Counter is not zero\");\n            }\n        }\n    }\n}",
+  "duration_ms": 194173,
+  "rag_sql_templates_usados": 0
+}

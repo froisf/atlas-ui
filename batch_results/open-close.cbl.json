@@ -1,0 +1,65 @@
+{
+  "ok": true,
+  "maven_log": "Sucesso",
+  "envelope_enviado": {
+    "envelope_version": "1.0.0",
+    "metadata": {
+      "program_name": "Open-close",
+      "source_language": "COBOL",
+      "tenant_id": "CLIENTE_PILOTO",
+      "timestamp": "2026-11-16T07:46:03Z"
+    },
+    "security_compliance": {
+      "pii_scrubbed": true,
+      "scrubbing_engine": "iFroix_PII_Scrubber_v2",
+      "scrubbed_tokens_count": 1
+    },
+    "payload": {
+      "source_code_clean": "       IDENTIFICATION              DIVISION.\n      ******************************************************************\n       PROGRAM-ID.                 prog.\n      ******************************************************************\n       DATA                        DIVISION.\n      ******************************************************************\n       WORKING-STORAGE             SECTION.\n       01 TEST-CASE-COUNT PIC 9999 VALUE 1.\n\n       EXEC SQL BEGIN DECLARE SECTION END-EXEC.\n       01  DBNAME                  PIC  X(30) VALUE SPACE.\n       01  USERNAME                PIC  X(30) VALUE SPACE.\n       01  PASSWD                  PIC  X(10) VALUE SPACE.\n\n       01  EMP-REC-VARS.\n         03  EMP-NO                PIC S9(04) VALUE ZERO.\n         03  EMP-NAME              PIC  X(20) .\n         03  EMP-SALARY            PIC S9(04) VALUE ZERO.\n       EXEC SQL END DECLARE SECTION END-EXEC.\n\n       EXEC SQL INCLUDE SQLCA END-EXEC.\n      ******************************************************************\n       PROCEDURE                   DIVISION.\n      ******************************************************************\n       MAIN-RTN.\n           \n       PERFORM SETUP-DB.\n\n       EXEC SQL\n           DECLARE CURSOR1 CURSOR FOR SELECT * FROM EMP\n       END-EXEC.\n\n      * Test case 0001 *************************************************\n       EXEC SQL\n           OPEN CURSOR1\n       END-EXEC.\n       PERFORM DISPLAY-TEST-RESULT.\n      ******************************************************************\n\n      * Test case 0002 *************************************************\n       EXEC SQL\n           CLOSE CURSOR1\n       END-EXEC.\n       PERFORM DISPLAY-TEST-RESULT.\n      ******************************************************************\n\n       PERFORM CLEANUP-DB.\n\n      *    END\n           STOP RUN.\n\n      ******************************************************************\n       SETUP-DB.\n      ******************************************************************\n\n      *    SERVER\n           MOVE  \"<|DB_NAME|>@<|DB_HOST|>:<|DB_PORT|>\"\n             TO DBNAME.\n           MOVE  \"<|DB_USER|>\"\n             TO USERNAME.\n           MOVE  \"<|DB_PASSWORD|>\"\n             TO PASSWD.\n\n           EXEC SQL\n               CONNECT :USERNAME IDENTIFIED BY :PASSWD USING :DBNAME \n           END-EXEC.\n\n           EXEC SQL\n               DROP TABLE IF EXISTS EMP\n           END-EXEC.\n\n           EXEC SQL\n                CREATE TABLE EMP\n                (\n                    EMP_NO     NUMERIC(4,0) NOT NULL,\n                    EMP_NAME   CHAR(20),\n                    EMP_SALARY NUMERIC(4,0),\n                    CONSTRAINT IEMP_0 PRIMARY KEY (EMP_NO)\n                )\n           END-EXEC.\n\n      ******************************************************************\n       CLEANUP-DB.\n      ******************************************************************\n           EXEC SQL\n               DROP TABLE IF EXISTS EMP\n           END-EXEC.\n\n           EXEC SQL\n               DISCONNECT ALL\n           END-EXEC.\n\n      ******************************************************************\n       DISPLAY-TEST-RESULT.\n      ******************************************************************\n           IF  SQLCODE = ZERO\n             THEN\n\n               DISPLAY \"<log> test case \" TEST-CASE-COUNT \": success\"\n               ADD 1 TO TEST-CASE-COUNT\n\n             ELSE\n               DISPLAY \"*** SQL ERROR ***\"\n               DISPLAY \"SQLCODE: \" SQLCODE \" \" NO ADVANCING\n               EVALUATE SQLCODE\n                  WHEN  +10\n                     DISPLAY \"Record not found\"\n                  WHEN  -01\n                     DISPLAY \"Connection falied\"\n                  WHEN  -20\n                     DISPLAY \"Internal error\"\n                  WHEN  -30\n                     DISPLAY \"PostgreSQL error\"\n                     DISPLAY \"ERRCODE: \"  SQLSTATE\n                     DISPLAY SQLERRMC\n                  *> TO RESTART TRANSACTION, DO ROLLBACK.\n                     EXEC SQL\n                         ROLLBACK\n                     END-EXEC\n                  WHEN  OTHER\n                     DISPLAY \"Undefined error\"\n                     DISPLAY \"ERRCODE: \"  SQLSTATE\n                     DISPLAY SQLERRMC\n               END-EVALUATE\n               STOP RUN.\n      ******************************************************************  \n"
+    },
+    "external_context": {
+      "called_programs": [],
+      "database_tables": [
+        {
+          "table_name": "ORDER_ITEMS",
+          "columns": [
+            {
+              "name": "ORDER_ITEM_ID",
+              "type": "INTEGER",
+              "is_pk": true
+            },
+            {
+              "name": "ITEM_PRICE",
+              "type": "DECIMAL",
+              "precision": 15,
+              "scale": 2
+            }
+          ]
+        }
+      ],
+      "sql_rag_templates": [
+        {
+          "pattern_id": "DB2_ENTITY_JPA",
+          "golden_standard_code": "package com.ifroix.atlas.entity;\n\nimport jakarta.persistence.Entity;\nimport jakarta.persistence.Id;\nimport jakarta.persistence.Table;\nimport jakarta.persistence.Column;\nimport java.math.BigDecimal;\n\n@Entity\n@Table(name = \"EMPLOYEE\")\nclass EmployeeEntity {\n    @Id\n    @Column(name = \"EMP_ID\")\n    private Integer empId;\n\n    @Column(name = \"EMP_NAME\")\n    private String empName;\n\n    @Column(name = \"EMP_SALARY\")\n    private BigDecimal empSalary;\n\n    public EmployeeEntity(Integer empId, String empName, BigDecimal empSalary) {\n        this.empId = empId; this.empName = empName; this.empSalary = empSalary;\n    }\n    public Integer getEmpId() { return empId; }\n    public String getEmpName() { return empName; }\n    public BigDecimal getEmpSalary() { return empSalary; }\n}"
+        },
+        {
+          "pattern_id": "DB2_INSERT",
+          "golden_standard_code": "package com.ifroix.atlas.service;\n\nimport org.springframework.stereotype.Service;\nimport org.springframework.transaction.annotation.Transactional;\nimport java.math.BigDecimal;\n\n@Service\nclass EmployeeService {\n    @Transactional\n    public void insertEmployee(Integer empId, String empName, BigDecimal salary) {\n        EmployeeEntity entity = new EmployeeEntity(empId, empName, salary);\n        // repository.save(entity);\n    }\n}"
+        },
+        {
+          "pattern_id": "DB2_COMMIT_ROLLBACK",
+          "golden_standard_code": "package com.ifroix.atlas.service;\n\nimport org.springframework.stereotype.Service;\nimport org.springframework.transaction.annotation.Transactional;\n\n@Service\nclass TransactionService {\n    @Transactional(rollbackFor = Exception.class)\n    public void executeTransaction() {\n        // O Spring gerencia COMMIT e ROLLBACK automaticamente aqui\n    }\n}"
+        }
+      ]
+    },
+    "target_contract": {
+      "output_format": "JSON_IR_CANONICAL_V1",
+      "strict_validation": true,
+      "additional_properties_allowed": false
+    }
+  },
+  "ir_json_gerada": "{\n  \"program_id\": \"Open-close\",\n  \"variaveis\": [\n    {\n      \"name\": \"TEST-CASE-COUNT\",\n      \"type\": \"NUMERIC\"\n    },\n    {\n      \"name\": \"DBNAME\",\n      \"type\": \"CHARACTER\"\n    },\n    {\n      \"name\": \"USERNAME\",\n      \"type\": \"CHARACTER\"\n    },\n    {\n      \"name\": \"PASSWD\",\n      \"type\": \"CHARACTER\"\n    },\n    {\n      \"name\": \"EMP-NO\",\n      \"type\": \"NUMERIC\"\n    },\n    {\n      \"name\": \"EMP-NAME\",\n      \"type\": \"CHARACTER\"\n    },\n    {\n      \"name\": \"EMP-SALARY\",\n      \"type\": \"NUMERIC\"\n    }\n  ],\n  \"fluxo\": [\n    \"SETUP-DB\",\n    \"OPEN CURSOR1\",\n    \"DISPLAY-TEST-RESULT\",\n    \"CLOSE CURSOR1\",\n    \"DISPLAY-TEST-RESULT\",\n    \"CLEANUP-DB\"\n  ]\n}",
+  "java_code": "package com.ifroix.atlas;\n\nimport org.springframework.stereotype.Service;\nimport org.springframework.transaction.annotation.Transactional;\n\nimport jakarta.persistence.Entity;\nimport jakarta.persistence.Id;\nimport jakarta.persistence.Table;\nimport jakarta.persistence.Column;\nimport java.math.BigDecimal;\n\n@Service\nclass OpenClose {\n    @Transactional(rollbackFor = Exception.class)\n    public void executarLogica() {\n        // Implementa\u00e7\u00e3o do fluxo baseado no JSON IR\n        // SETUP-DB\n        // OPEN CURSOR1\n        // DISPLAY-TEST-RESULT\n        // CLOSE CURSOR1\n        // DISPLAY-TEST-RESULT\n        // CLEANUP-DB\n\n        // Exemplo de como inserir um funcion\u00e1rio\n        Integer empNo = 12345;\n        String empName = \"John Doe\";\n        BigDecimal empSalary = new BigDecimal(\"50000.00\");\n        EmployeeEntity employeeEntity = new EmployeeEntity(empNo, empName, empSalary);\n        // repository.save(employeeEntity);\n    }\n}\n\n@Entity\n@Table(name = \"EMPLOYEE\")\nclass EmployeeEntity {\n    @Id\n    @Column(name = \"EMP_ID\")\n    private Integer empId;\n\n    @Column(name = \"EMP_NAME\")\n    private String empName;\n\n    @Column(name = \"EMP_SALARY\")\n    private BigDecimal empSalary;\n\n    public EmployeeEntity(Integer empId, String empName, BigDecimal empSalary) {\n        this.empId = empId;\n        this.empName = empName;\n        this.empSalary = empSalary;\n    }\n\n    public Integer getEmpId() {\n        return empId;\n    }\n\n    public String getEmpName() {\n        return empName;\n    }\n\n    public BigDecimal getEmpSalary() {\n        return empSalary;\n    }\n}",
+  "duration_ms": 392030,
+  "rag_sql_templates_usados": 3
+}
