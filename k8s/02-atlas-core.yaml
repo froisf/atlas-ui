@@ -1,0 +1,53 @@
+﻿apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: atlas-core-config
+  namespace: atlas-agentic
+data:
+  VLLM_BASE_URL: "http://vllm-service.atlas-agentic.svc.cluster.local:8000/v1"
+  CHROMADB_HOST: "chromadb-service.atlas-agentic.svc.cluster.local"
+  CHROMADB_PORT: "8000"
+  SQLITE_DB_PATH: "/data/atlas.db"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: atlas-db-pvc
+  namespace: atlas-agentic
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas-core
+  namespace: atlas-agentic
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: atlas-core
+  template:
+    metadata:
+      labels:
+        app: atlas-core
+    spec:
+      serviceAccountName: atlas-job-launcher-sa
+      containers:
+      - name: atlas-core-container
+        image: ifroix/atlas-super-agentic:v5.7
+        ports:
+        - containerPort: 8080
+        envFrom:
+        - configMapRef:
+            name: atlas-core-config
+        volumeMounts:
+        - mountPath: /data
+          name: atlas-db-storage
+      volumes:
+      - name: atlas-db-storage
+        persistentVolumeClaim:
+          claimName: atlas-db-pvc

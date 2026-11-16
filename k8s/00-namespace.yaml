@@ -1,0 +1,7 @@
+﻿apiVersion: v1
+kind: Namespace
+metadata:
+  name: atlas-agentic
+  labels:
+    app.kubernetes.io/name: atlas-super-agentic
+    app.kubernetes.io/part-of: lpn-legado-para-novo
