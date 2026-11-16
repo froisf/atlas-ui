@@ -30,7 +30,7 @@ CHUNK_THRESHOLD = 100
 
 BASE_SANDBOX.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="Atlas Agentic MCP Enterprise v5.8")
+app = FastAPI(title="Atlas Agentic MCP Enterprise v5.9")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 if HAS_WEBHOOK: app.include_router(webhook_router)
 
@@ -87,6 +87,7 @@ def retrieve_episodic_fix(error_log: str, cobol_clause: str) -> str:
     except Exception: pass
     return None
 
+# ADICIONADO O SUREFIRE PLUGIN PARA FORCAR FALHA SE NAO HOUVER TESTES
 POM_XML_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
@@ -110,6 +111,17 @@ POM_XML_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
             <scope>test</scope>
         </dependency>
     </dependencies>
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <failIfNoTests>true</failIfNoTests>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>
 """
 
@@ -160,15 +172,15 @@ REGRAS OBRIGATORIAS:
 3. A classe de servico DEVE ter a anotacao @Service e o metodo `public void executarLogica()`.
 4. E ESTRITAMENTE PROIBIDO criar o metodo `public static void main`.
 5. **ATLAS VERIFIER (JUNIT PURO):** Voce DEVE criar uma segunda classe de teste chamada `{class_name}Test`.
-   - E ESTRITAMENTE PROIBIDO usar `@SpringBootTest` ou carregar o contexto do Spring. Use APENAS JUnit 5 puro.
+   - E ESTRITAMENTE PROIBIDO usar `@SpringBootTest`. Use APENAS JUnit 5 puro.
    - O teste deve instanciar a classe principal manualmente (`{class_name} obj = new {class_name}();`) e chamar o metodo `obj.executarLogica()` dentro de `assertDoesNotThrow(() -> obj.executarLogica());`.
    - Importe `org.junit.jupiter.api.Test;` e `org.junit.jupiter.api.Assertions.*`.
-6. **SEPARACAO DE ARQUIVOS:** Use EXATAMENTE a string `// --- FILE: {class_name}Test.java ---` para separar o arquivo de servico do arquivo de teste.
+6. **SEPARACAO OBRIGATORIA:** Voce DEVE usar EXATAMENTE a string `// --- FILE: {class_name}Test.java ---` para separar o arquivo de servico do arquivo de teste. Se voce nao usar essa string, o sistema vai falhar.
 7. **REGRA DE ARQUIVO UNICO:** No arquivo de servico, declare TODAS as classes (Entity, Repository) no mesmo arquivo, sem `public`, e PROIBIDO importar com.ifroix.atlas.entity.* ou repository.*.
 8. MATRIZ DE TIPOS: PIC S9(04) -> Integer, PIC S9(X)V99 -> BigDecimal, PIC X -> String.
 9. TRANSACOES: COMMIT/ROLLBACK exigem @Transactional(rollbackFor = Exception.class).
 {rag_context}
-10. Retorne APENAS o codigo Java (os dois arquivos separados).
+10. Retorne APENAS o codigo Java (os dois arquivos separados pela string).
 
 IR JSON:
 {ir_json}
@@ -181,7 +193,7 @@ Codigo com erro:
 Erro do Maven:
 {compile_error}
 CORRIJA o codigo. Mantenha o pacote com.ifroix.atlas e a classe {class_name}.
-LEMBRE-SE DA SEPARACAO DE ARQUIVOS com `// --- FILE: {class_name}Test.java ---`.
+LEMBRE-SE DA SEPARACAO OBRIGATORIA com `// --- FILE: {class_name}Test.java ---`.
 LEMBRE-SE: O teste deve ser JUnit PURO (sem @SpringBootTest) e usar assertDoesNotThrow.
 Retorne APENAS o codigo Java corrigido.
 """
@@ -197,9 +209,8 @@ def extract_java_files(llm_output: str, expected_class_name: str) -> tuple[str, 
         service_code = parts[0].strip()
         test_code = parts[1].strip()
     else:
-        warnings.append("Atencao: O LLM nao separou o arquivo de teste.")
-        service_code = raw_code
-        test_code = ""
+        # O PULO DO GATO: Se nao separar, joga erro para o Self-Healing
+        raise ValueError("O LLM nao gerou o separador de arquivos. O teste JUnit esta ausente.")
 
     start_match = re.search(r"(package\s+|import\s+|public\s+class\s+)", service_code)
     if start_match: service_code = service_code[start_match.start():]
@@ -320,9 +331,15 @@ async def convert_mcp(req: ConvertRequest):
         if tentativa == 1: java_prompt = build_java_from_ir_prompt(ir_json_consolidada, class_name, sql_templates)
         else: java_prompt = build_correction_prompt(java_code, compile_error, class_name)
         
-        llm_output = call_ollama(java_prompt)
-        java_code, test_code, warnings = extract_java_files(llm_output, class_name)
-        java_code = remove_main_method(java_code)
+        try:
+            llm_output = call_ollama(java_prompt)
+            java_code, test_code, warnings = extract_java_files(llm_output, class_name)
+            java_code = remove_main_method(java_code)
+        except ValueError as e:
+            print(f"❌ [Erro de Parse] {e}")
+            compile_error = str(e)
+            tentativa += 1
+            continue # Pula para a proxima tentativa sem rodar o Maven
         
         with open(out_main_path, "w", encoding="utf-8") as f: f.write(java_code)
         if test_code:
@@ -363,5 +380,5 @@ async def chat_with_ollama(req: ChatRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    print("Atlas API v5.8 (Atlas Verifier - JUnit Puro) rodando na porta 8000!")
+    print("Atlas API v5.9 (Atlas Verifier - Test Enforcement) rodando na porta 8000!")
     uvicorn.run(app, host="0.0.0.0", port=8000)
