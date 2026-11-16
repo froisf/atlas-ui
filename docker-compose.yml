@@ -1,0 +1,33 @@
+﻿version: '3.8'
+
+services:
+  atlas-api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./_limpo:/app/_limpo
+      - ./chroma_db:/app/chroma_db
+      - ./atlas.db:/app/atlas.db
+    environment:
+      - OLLAMA_URL=http://ollama:11434/api/generate
+      - COBOL_ROOT=/app/legacy-cobol
+    depends_on:
+      - ollama
+
+  chromadb:
+    image: chromadb/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./chroma_db:/chroma/chroma
+
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+volumes:
+  ollama_data:
