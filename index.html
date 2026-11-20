@@ -173,5 +173,5 @@
             }
         }
     </script>
-</body>
+<script>async function checkHealth(){ try { const h = await fetch("http://127.0.0.1:8000/api/health"); const s = await fetch("http://127.0.0.1:8000/api/status"); console.log("health", h.status, "status", s.status); } catch (e) { console.log("bridge offline", e.message); } } checkHealth();</script></body>
 </html>

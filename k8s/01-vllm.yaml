@@ -1,8 +1,10 @@
-﻿apiVersion: apps/v1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: vllm-inference
   namespace: atlas-agentic
+  labels:
+    app: vllm-inference
 spec:
   replicas: 1
   selector:
@@ -15,19 +17,31 @@ spec:
     spec:
       containers:
       - name: vllm-container
-        image: vllm/vllm-openai:v0.6.0
-        args: ["--model", "Qwen/Qwen2.5-Coder-14B-Instruct", "--port", "8000", "--max-model-len", "8192"]
+        image: "public.ecr.aws/q9t5s3a7/vllm-cpu-release-repo:latest"
+        env:
+        - name: HF_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-token
+              key: HF_TOKEN
+        args: ["--model", "Qwen/Qwen2.5-Coder-1.5B-Instruct", "--port", "8000", "--max-model-len", "512", "--dtype", "bfloat16", "--enforce-eager"]
         ports:
         - containerPort: 8000
+        volumeMounts:
+        - name: shm
+          mountPath: /dev/shm
         resources:
           limits:
-            nvidia.com/gpu: "1"
-            memory: "32Gi"
-            cpu: "8"
-          requests:
-            nvidia.com/gpu: "1"
-            memory: "16Gi"
+            memory: "4Gi"
             cpu: "4"
+          requests:
+            memory: "4Gi"
+            cpu: "2"
+      volumes:
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: 1Gi
 ---
 apiVersion: v1
 kind: Service
@@ -35,9 +49,10 @@ metadata:
   name: vllm-service
   namespace: atlas-agentic
 spec:
-  type: ClusterIP
-  ports:
-  - port: 8000
-    targetPort: 8000
   selector:
     app: vllm-inference
+  ports:
+  - protocol: TCP
+    port: 8000
+    targetPort: 8000
+  type: ClusterIP

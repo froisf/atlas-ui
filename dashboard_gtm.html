@@ -28,7 +28,7 @@
         <div class="kpi-container">
             <div class="kpi-card">
                 <h3>Total Convertido</h3>
-                <div class="value" style="color: var(--accent);">18</div>
+                <div class="value" style="color: var(--accent);">32</div>
             </div>
             <div class="kpi-card" style="border-top-color: var(--success);">
                 <h3>Taxa de Sucesso</h3>
@@ -36,11 +36,11 @@
             </div>
             <div class="kpi-card" style="border-top-color: var(--warning);">
                 <h3>Tempo Médio</h3>
-                <div class="value" style="color: var(--warning);">446s</div>
+                <div class="value" style="color: var(--warning);">500s</div>
             </div>
             <div class="kpi-card">
                 <h3>Chunks Processados</h3>
-                <div class="value" style="color: var(--text);">18</div>
+                <div class="value" style="color: var(--text);">32</div>
             </div>
         </div>
 
@@ -60,7 +60,7 @@
                 data: {
                     labels: ['Auto-Aprovado (LOW)', 'Pendente (HIGH)', 'Aprovado (Humano)'],
                     datasets: [{
-                        data: [15, 0, 3],
+                        data: [15, 14, 3],
                         backgroundColor: ['#22c55e', '#f59e0b', '#38bdf8'],
                         borderWidth: 1
                     }]
@@ -72,10 +72,10 @@
             new Chart(document.getElementById('riskChart').getContext('2d'), {
                 type: 'bar',
                 data: {
-                    labels: ["CFC018", "a", "cfc018", "commit-rollback", "connect-disconnect", "declare", "delete", "fetch", "insert", "open-close", "other-sql", "prepare-execute", "select", "test", "update", "A", "Insert", "insert"],
+                    labels: ["CFC018", "a", "cfc018", "commit-rollback", "connect-disconnect", "declare", "delete", "fetch", "insert", "open-close", "other-sql", "prepare-execute", "select", "test", "update", "A", "Insert", "insert", "a", "cfc018", "commit-rollback", "connect-disconnect", "declare", "delete", "fetch", "insert", "open-close", "other-sql", "prepare-execute", "select", "test", "update"],
                     datasets: [{
                         label: 'Tempo de Conversão (s)',
-                        data: [63.833, 131.795, 800.919, 861.732, 415.45, 464.551, 573.209, 569.708, 797.669, 392.03, 694.456, 895.51, 581.337, 194.173, 594.478, 0.0, 0.0, 0.0],
+                        data: [63.833, 131.795, 800.919, 861.732, 415.45, 464.551, 573.209, 569.708, 797.669, 392.03, 694.456, 895.51, 581.337, 194.173, 594.478, 0.0, 0.0, 0.0, 131.795, 800.919, 861.732, 415.45, 464.551, 573.209, 569.708, 797.669, 392.03, 694.456, 895.51, 581.337, 194.173, 594.478],
                         backgroundColor: '#38bdf8',
                         borderRadius: 4
                     }]

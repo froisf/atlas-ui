@@ -1,1 +1,7 @@
-kubernetes
+﻿kubernetes
+jsonschema
+fastapi
+uvicorn
+requests
+pydantic
+chromadb

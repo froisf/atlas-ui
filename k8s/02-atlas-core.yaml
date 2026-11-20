@@ -38,7 +38,8 @@ spec:
       serviceAccountName: atlas-job-launcher-sa
       containers:
       - name: atlas-core-container
-        image: ifroix/atlas-super-agentic:v5.7
+        image: atlas-core:latest
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8080
         envFrom:

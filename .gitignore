@@ -1,0 +1,10 @@
+﻿# HIG-1
+atlas.db
+chroma_db/
+__pycache__/
+*.log
+*.swp
+.MERGE_MSG.swp
+load_test_report_*.json
+dashboard_gtm_*.png
+_limpo/

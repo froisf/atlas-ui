@@ -14,80 +14,128 @@ from pydantic import BaseModel
 import chromadb
 
 from cobol_chunker import CobolChunker, CobolChunk
+from atlas_k8s_verifier import AtlasK8sVerifier
 
 try:
     from webhook_router import router as webhook_router
+
     HAS_WEBHOOK = True
 except ImportError:
     HAS_WEBHOOK = False
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434/api/generate")
 MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:14b")
-COBOL_ROOT = Path(os.getenv("COBOL_ROOT", r"D:\Workspace\01-Products\nw-poc\legacy-cobol")).resolve()
+COBOL_ROOT = Path(
+    os.getenv("COBOL_ROOT", r"D:\Workspace\01-Products\nw-poc\legacy-cobol")
+).resolve()
 BASE_SANDBOX = Path(os.getcwd()) / "_limpo"
 TIMEOUT_SEC = 1800
 MAX_TENTATIVAS = 3
-CHUNK_THRESHOLD = 100 
+CHUNK_THRESHOLD = 100
 
 BASE_SANDBOX.mkdir(parents=True, exist_ok=True)
+
 
 # ==========================================
 # RISK ENGINE CORRIGIDO
 # ==========================================
 def evaluate_risk(cobol_code: str) -> str:
     # Detecta EXEC SQL com qualquer espaço ou quebra de linha
-    high_risk_patterns = [r"EXEC\s+SQL\s+(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)", r"WRITE", r"DELETE FILE", r"OPEN OUTPUT"]
+    high_risk_patterns = [
+        r"EXEC\s+SQL\s+(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE)",
+        r"WRITE",
+        r"DELETE FILE",
+        r"OPEN OUTPUT",
+    ]
     for pattern in high_risk_patterns:
         if re.search(pattern, cobol_code, re.IGNORECASE):
             return "HIGH"
-    
+
     medium_risk_patterns = [r"CALL ", r"READ ", r"EXEC\s+SQL\s+SELECT"]
     for pattern in medium_risk_patterns:
         if re.search(pattern, cobol_code, re.IGNORECASE):
             return "MEDIUM"
     return "LOW"
 
+
 def save_approval_audit(job_id, program_name, risk_level, status):
     try:
-        conn = sqlite3.connect('atlas.db')
+        conn = sqlite3.connect("atlas.db")
         cursor = conn.cursor()
         cursor.execute("PRAGMA table_info(conversion_audit)")
         columns = [col[1] for col in cursor.fetchall()]
         if "risk_level" not in columns:
-            cursor.execute("ALTER TABLE conversion_audit ADD COLUMN risk_level TEXT DEFAULT 'LOW'")
+            cursor.execute(
+                "ALTER TABLE conversion_audit ADD COLUMN risk_level TEXT DEFAULT 'LOW'"
+            )
         if "approval_status" not in columns:
-            cursor.execute("ALTER TABLE conversion_audit ADD COLUMN approval_status TEXT DEFAULT 'PENDING'")
-        
-        cursor.execute('''
+            cursor.execute(
+                "ALTER TABLE conversion_audit ADD COLUMN approval_status TEXT DEFAULT 'PENDING'"
+            )
+
+        cursor.execute(
+            """
             INSERT INTO conversion_audit (
                 job_id, program_name, status, attempts, duration_seconds, 
                 ir_canonical_valid, bigdecimal_valid, mcp_rag_used, 
                 maven_compile_status, error_log, timestamp, risk_level, approval_status
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            job_id, program_name, 'SUCCESS', 1, 0,
-            True, True, True, 'BUILD SUCCESS', 'None', 
-            time.strftime("%Y-%m-%dT%H:%M:%SZ"), risk_level, status
-        ))
+        """,
+            (
+                job_id,
+                program_name,
+                "SUCCESS",
+                1,
+                0,
+                True,
+                True,
+                True,
+                "BUILD SUCCESS",
+                "None",
+                time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                risk_level,
+                status,
+            ),
+        )
         conn.commit()
         conn.close()
     except Exception as e:
         print(f"[Audit] Erro ao salvar no SQLite: {e}")
 
+
 app = FastAPI(title="Atlas Agentic MCP Enterprise v6.1")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-if HAS_WEBHOOK: app.include_router(webhook_router)
+app.add_middleware(
+    CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+)
+if HAS_WEBHOOK:
+    app.include_router(webhook_router)
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok", "service": "atlas-ui"}
+
+@app.get("/api/status")
+async def status():
+    return {"status": "ok", "vllm": "unknown", "bridge": "up"}
 
 chroma_client = chromadb.PersistentClient(path="./chroma_db")
 cobol_context = chroma_client.get_or_create_collection(name="cobol_context")
 sql_rag_collection = chroma_client.get_or_create_collection(name="sql_rag_templates")
-postmortem_collection = chroma_client.get_or_create_collection(name="postmortems_compilation_memory")
+postmortem_collection = chroma_client.get_or_create_collection(
+    name="postmortems_compilation_memory"
+)
+
 
 def scrub_pii(cobol_code: str) -> str:
     cobol_code = re.sub(r"\d{3}\.\d{3}\.\d{3}-\d{2}", "[CPF_MASKED]", cobol_code)
-    cobol_code = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", "[EMAIL_MASKED]", cobol_code)
+    cobol_code = re.sub(
+        r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+        "[EMAIL_MASKED]",
+        cobol_code,
+    )
     cobol_code = re.sub(r"'([A-Za-z0-9\s]{4,})'", "'[STRING_MASKED]'", cobol_code)
     return cobol_code
+
 
 IR_SCHEMA = {
     "type": "object",
@@ -100,6 +148,7 @@ IR_SCHEMA = {
     "additionalProperties": False,
 }
 
+
 def validate_ir(ir_json_str: str) -> dict:
     try:
         data = json.loads(ir_json_str)
@@ -108,28 +157,56 @@ def validate_ir(ir_json_str: str) -> dict:
     except Exception as e:
         raise ValueError(f"JSON Schema Validation Failed: {e}")
 
+
 def save_postmortem(error_log: str, cobol_clause: str, applied_patch: str):
     try:
         error_hash = hashlib.sha256(error_log[:500].encode("utf-8")).hexdigest()
         category = "GENERIC_ERROR"
-        if "@Repository" in error_log or "cannot find symbol" in error_log: category = "MISSING_SPRING_ANNOTATION"
-        elif "BigDecimal" in error_log: category = "TYPE_MISMATCH"
-        elif "@Transactional" in error_log: category = "MISSING_TRANSACTIONAL"
-        postmortem_collection.add(documents=[error_log[:2000]], metadatas=[{"error_category": category, "error_hash": error_hash, "cobol_clause": cobol_clause, "applied_patch_code": applied_patch}], ids=[f"err_{error_hash}"])
-        print(f"[Memoria] Postmortem salvo (Categoria: {category} / Clausula: {cobol_clause})")
-    except Exception as e: print(f"[Memoria] Erro ao salvar: {e}")
+        if "@Repository" in error_log or "cannot find symbol" in error_log:
+            category = "MISSING_SPRING_ANNOTATION"
+        elif "BigDecimal" in error_log:
+            category = "TYPE_MISMATCH"
+        elif "@Transactional" in error_log:
+            category = "MISSING_TRANSACTIONAL"
+        postmortem_collection.add(
+            documents=[error_log[:2000]],
+            metadatas=[
+                {
+                    "error_category": category,
+                    "error_hash": error_hash,
+                    "cobol_clause": cobol_clause,
+                    "applied_patch_code": applied_patch,
+                }
+            ],
+            ids=[f"err_{error_hash}"],
+        )
+        print(
+            f"[Memoria] Postmortem salvo (Categoria: {category} / Clausula: {cobol_clause})"
+        )
+    except Exception as e:
+        print(f"[Memoria] Erro ao salvar: {e}")
+
 
 def retrieve_episodic_fix(error_log: str, cobol_clause: str) -> str:
     try:
-        if postmortem_collection.count() == 0: return None
-        results = postmortem_collection.query(query_texts=[error_log[:2000]], where={"cobol_clause": cobol_clause}, n_results=1)
+        if postmortem_collection.count() == 0:
+            return None
+        results = postmortem_collection.query(
+            query_texts=[error_log[:2000]],
+            where={"cobol_clause": cobol_clause},
+            n_results=1,
+        )
         if results["distances"] and results["distances"][0]:
             dist = results["distances"][0][0]
             if dist <= 0.15:
-                print(f"[Memoria] Solucao recuperada (Dist: {dist:.4f}) para {cobol_clause}")
+                print(
+                    f"[Memoria] Solucao recuperada (Dist: {dist:.4f}) para {cobol_clause}"
+                )
                 return results["metadatas"][0][0].get("applied_patch_code")
-    except Exception: pass
+    except Exception:
+        pass
     return None
+
 
 POM_XML_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
@@ -168,29 +245,41 @@ POM_XML_TEMPLATE = """<?xml version="1.0" encoding="UTF-8"?>
 </project>
 """
 
+
 class ConvertRequest(BaseModel):
     arquivo: str
     cliente: str = "CLIENTE_PILOTO"
 
+
 class ChatRequest(BaseModel):
     message: str
+
 
 class ApprovalRequest(BaseModel):
     job_id: str
     program_name: str
     decision: str
 
+
 def call_ollama(prompt: str, temperature: float = 0.1) -> str:
-    payload = {"model": MODEL, "prompt": prompt, "stream": False, "options": {"temperature": temperature}}
+    payload = {
+        "model": MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": temperature},
+    }
     try:
         response = requests.post(OLLAMA_URL, json=payload, timeout=TIMEOUT_SEC)
         response.raise_for_status()
         return response.json().get("response", "")
-    except requests.exceptions.ConnectionError: raise HTTPException(status_code=502, detail="Ollama nao esta rodando.")
+    except requests.exceptions.ConnectionError:
+        raise HTTPException(status_code=502, detail="Ollama nao esta rodando.")
+
 
 def extract_json(llm_output: str) -> str:
     match = re.search(r"```(?:json)?\s*(.*?)```", llm_output, re.DOTALL | re.IGNORECASE)
     return match.group(1).strip() if match else llm_output.strip()
+
 
 def build_ir_prompt(envelope: dict, chunk_text: str) -> str:
     return f"""Voce e um engenheiro de software senior especialista em analise de sistemas legados.
@@ -205,11 +294,19 @@ ENVELOPE DE CONTEXTO:
 {json.dumps(envelope, indent=2)}
 """
 
-def build_java_from_ir_prompt(ir_json: str, class_name: str, sql_templates: list) -> str:
+
+def build_java_from_ir_prompt(
+    ir_json: str, class_name: str, sql_templates: list
+) -> str:
     rag_context = ""
     if sql_templates:
-        rag_context = "\nUSE OS SEGUINTES PADROES (GOLDEN STANDARDS) RECUPERADOS DO RAG:\n"
-        for t in sql_templates: rag_context += f"\n--- Pattern {t['pattern_id']} ---\n{t['golden_standard_code']}\n"
+        rag_context = (
+            "\nUSE OS SEGUINTES PADROES (GOLDEN STANDARDS) RECUPERADOS DO RAG:\n"
+        )
+        for t in sql_templates:
+            rag_context += (
+                f"\n--- Pattern {t['pattern_id']} ---\n{t['golden_standard_code']}\n"
+            )
 
     return f"""Voce e um engenheiro de software senior especialista em modernizacao.
 Sua tarefa e escrever o codigo Java 21 com Spring Boot 3 E a classe de teste JUnit 5 baseado na IR abaixo.
@@ -235,7 +332,10 @@ IR JSON:
 {ir_json}
 """
 
-def build_correction_prompt(previous_code: str, compile_error: str, class_name: str) -> str:
+
+def build_correction_prompt(
+    previous_code: str, compile_error: str, class_name: str
+) -> str:
     return f"""O codigo Java Spring Boot (ou o Teste JUnit) que voce gerou tem erros.
 Codigo com erro:
 {previous_code}
@@ -248,43 +348,58 @@ LEMBRE-SE DA REGRA DE OURO: TODOS os imports devem estar no topo do arquivo.
 Retorne APENAS o codigo Java corrigido.
 """
 
-def extract_java_files(llm_output: str, expected_class_name: str) -> tuple[str, str, list[str]]:
+
+def extract_java_files(
+    llm_output: str, expected_class_name: str
+) -> tuple[str, str, list[str]]:
     warnings = []
-    match = re.search(r"```(?:java|markdown)?\s*(.*?)```", llm_output, re.DOTALL | re.IGNORECASE)
+    match = re.search(
+        r"```(?:java|markdown)?\s*(.*?)```", llm_output, re.DOTALL | re.IGNORECASE
+    )
     raw_code = match.group(1).strip() if match else llm_output.strip()
-    
+
     separator = f"// --- FILE: {expected_class_name}Test.java ---"
     if separator in raw_code:
         parts = raw_code.split(separator)
         service_code = parts[0].strip()
         test_code = parts[1].strip()
     else:
-        raise ValueError("O LLM nao gerou o separador de arquivos. O teste JUnit esta ausente.")
+        raise ValueError(
+            "O LLM nao gerou o separador de arquivos. O teste JUnit esta ausente."
+        )
 
     start_match = re.search(r"(package\s+|import\s+|public\s+class\s+)", service_code)
-    if start_match: service_code = service_code[start_match.start():]
+    if start_match:
+        service_code = service_code[start_match.start() :]
     fim = service_code.rfind("}")
-    if fim != -1: service_code = service_code[:fim+1]
+    if fim != -1:
+        service_code = service_code[: fim + 1]
 
     if test_code:
         start_test = re.search(r"(package\s+|import\s+|public\s+class\s+)", test_code)
-        if start_test: test_code = test_code[start_test.start():]
+        if start_test:
+            test_code = test_code[start_test.start() :]
         fim_test = test_code.rfind("}")
-        if fim_test != -1: test_code = test_code[:fim_test+1]
+        if fim_test != -1:
+            test_code = test_code[: fim_test + 1]
 
     return service_code, test_code, warnings
+
 
 def remove_main_method(java_code: str) -> str:
     padrao = r"public\s+static\s+void\s+main\s*\([^)]*\)\s*\{[^}]*\}"
     return re.sub(padrao, "", java_code, flags=re.DOTALL)
+
 
 @app.post("/api/convert_mcp")
 async def convert_mcp(req: ConvertRequest):
     start_time = time.time()
     class_name = Path(req.arquivo).stem.capitalize()
     target_path = (COBOL_ROOT / req.arquivo).resolve()
-    if not target_path.exists(): raise HTTPException(status_code=404, detail="Arquivo COBOL nao encontrado.")
-    with open(target_path, "r", encoding="utf-8", errors="replace") as f: cobol_raw = f.read()
+    if not target_path.exists():
+        raise HTTPException(status_code=404, detail="Arquivo COBOL nao encontrado.")
+    with open(target_path, "r", encoding="utf-8", errors="replace") as f:
+        cobol_raw = f.read()
 
     print(f"[MCP] Fase 1: PII Scrubber...")
     cobol_clean = scrub_pii(cobol_raw)
@@ -292,10 +407,10 @@ async def convert_mcp(req: ConvertRequest):
     risk_level = evaluate_risk(cobol_clean)
     print(f"[MCP] Risk Engine: Classificado como {risk_level}")
 
-    total_lines = len(cobol_clean.split('\n'))
+    total_lines = len(cobol_clean.split("\n"))
     chunks = []
     chunks_count = 1
-    
+
     if total_lines > CHUNK_THRESHOLD:
         print(f"[MCP] Arquivo grande ({total_lines} linhas). Ativando Chunker...")
         chunker = CobolChunker(max_lines_per_chunk=80)
@@ -304,38 +419,104 @@ async def convert_mcp(req: ConvertRequest):
         print(f"[MCP] Arquivo dividido em {chunks_count} chunks de 80 linhas.")
     else:
         print(f"[MCP] Arquivo pequeno ({total_lines} linhas). Processamento direto.")
-        chunks = [CobolChunk(global_data_context=cobol_clean, procedure_code="", chunk_index=1)]
+        chunks = [
+            CobolChunk(
+                global_data_context=cobol_clean, procedure_code="", chunk_index=1
+            )
+        ]
         chunks_count = 1
 
     print(f"[MCP] Fase 2: Consultando ChromaDB (RAG)...")
     called_programs, db_tables, sql_templates = [], [], []
-    
+
     if "CALL 'SUBPRG01'" in cobol_clean:
-        called_programs.append({"program_name": "SUBPRG01", "description": "Assinatura recuperada via ChromaDB RAG", "parameters": [{"name": "WS-ORDER-REC", "type": "STRUCT", "fields": [{"name": "ORDER-ID", "type": "INTEGER"}, {"name": "TOTAL-AMT", "type": "DECIMAL", "precision": 15, "scale": 2}]}]})
-    
+        called_programs.append(
+            {
+                "program_name": "SUBPRG01",
+                "description": "Assinatura recuperada via ChromaDB RAG",
+                "parameters": [
+                    {
+                        "name": "WS-ORDER-REC",
+                        "type": "STRUCT",
+                        "fields": [
+                            {"name": "ORDER-ID", "type": "INTEGER"},
+                            {
+                                "name": "TOTAL-AMT",
+                                "type": "DECIMAL",
+                                "precision": 15,
+                                "scale": 2,
+                            },
+                        ],
+                    }
+                ],
+            }
+        )
+
     if "EXEC SQL" in cobol_clean:
-        db_tables.append({"table_name": "ORDER_ITEMS", "columns": [{"name": "ORDER_ITEM_ID", "type": "INTEGER", "is_pk": True}, {"name": "ITEM_PRICE", "type": "DECIMAL", "precision": 15, "scale": 2}]})
+        db_tables.append(
+            {
+                "table_name": "ORDER_ITEMS",
+                "columns": [
+                    {"name": "ORDER_ITEM_ID", "type": "INTEGER", "is_pk": True},
+                    {
+                        "name": "ITEM_PRICE",
+                        "type": "DECIMAL",
+                        "precision": 15,
+                        "scale": 2,
+                    },
+                ],
+            }
+        )
         try:
-            sql_results = sql_rag_collection.query(query_texts=[cobol_clean[:1000]], n_results=3)
+            sql_results = sql_rag_collection.query(
+                query_texts=[cobol_clean[:1000]], n_results=3
+            )
             if sql_results["documents"] and sql_results["documents"][0]:
-                print(f"[RAG SQL] {len(sql_results['documents'][0])} templates recuperados!")
-                for doc, meta in zip(sql_results["documents"][0], sql_results["metadatas"][0]):
-                    sql_templates.append({"pattern_id": meta.get("pattern_id", "UNKNOWN"), "golden_standard_code": meta.get("payload_json", doc)})
-        except Exception as e: print(f"[RAG SQL] Erro ao buscar templates: {e}")
+                print(
+                    f"[RAG SQL] {len(sql_results['documents'][0])} templates recuperados!"
+                )
+                for doc, meta in zip(
+                    sql_results["documents"][0], sql_results["metadatas"][0]
+                ):
+                    sql_templates.append(
+                        {
+                            "pattern_id": meta.get("pattern_id", "UNKNOWN"),
+                            "golden_standard_code": meta.get("payload_json", doc),
+                        }
+                    )
+        except Exception as e:
+            print(f"[RAG SQL] Erro ao buscar templates: {e}")
 
     print(f"[MCP] Fase 3: Montando Context Envelope...")
     envelope = {
         "envelope_version": "1.0.0",
-        "metadata": {"program_name": class_name, "source_language": "COBOL", "tenant_id": req.cliente, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ")},
-        "security_compliance": {"pii_scrubbed": True, "scrubbing_engine": "iFroix_PII_Scrubber_v2", "scrubbed_tokens_count": 1},
+        "metadata": {
+            "program_name": class_name,
+            "source_language": "COBOL",
+            "tenant_id": req.cliente,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
+        "security_compliance": {
+            "pii_scrubbed": True,
+            "scrubbing_engine": "iFroix_PII_Scrubber_v2",
+            "scrubbed_tokens_count": 1,
+        },
         "payload": {"source_code_clean": cobol_clean},
-        "external_context": {"called_programs": called_programs, "database_tables": db_tables, "sql_rag_templates": sql_templates},
-        "target_contract": {"output_format": "JSON_IR_CANONICAL_V1", "strict_validation": True, "additional_properties_allowed": False},
+        "external_context": {
+            "called_programs": called_programs,
+            "database_tables": db_tables,
+            "sql_rag_templates": sql_templates,
+        },
+        "target_contract": {
+            "output_format": "JSON_IR_CANONICAL_V1",
+            "strict_validation": True,
+            "additional_properties_allowed": False,
+        },
     }
 
     print(f"[MCP] Fase 4: LLM -> IR (AST) Canonica...")
     ir_json_consolidada = ""
-    
+
     if chunks_count == 1:
         ir_raw = call_ollama(build_ir_prompt(envelope, cobol_clean))
         ir_json_consolidada = extract_json(ir_raw)
@@ -343,24 +524,38 @@ async def convert_mcp(req: ConvertRequest):
         ir_results = []
         for chunk in chunks:
             print(f"[MCP] Processando Chunk {chunk.chunk_index}/{chunks_count}...")
-            chunk_text = chunk.global_data_context + "\n" + chunk.procedure_code if chunk.procedure_code else chunk.global_data_context
+            chunk_text = (
+                chunk.global_data_context + "\n" + chunk.procedure_code
+                if chunk.procedure_code
+                else chunk.global_data_context
+            )
             ir_raw = call_ollama(build_ir_prompt(envelope, chunk_text))
             ir_results.append(extract_json(ir_raw))
-                
-        ir_json_consolidada = json.dumps({"program_id": class_name, "variaveis": [], "fluxo": [f"CHUNK_{i+1}: {ir}" for i, ir in enumerate(ir_results)]})
+
+        ir_json_consolidada = json.dumps(
+            {
+                "program_id": class_name,
+                "variaveis": [],
+                "fluxo": [f"CHUNK_{i+1}: {ir}" for i, ir in enumerate(ir_results)],
+            }
+        )
 
     print(f"[MCP] Fase 5: Validando JSON Schema...")
-    try: validate_ir(ir_json_consolidada); print("JSON Schema validado com sucesso!")
-    except ValueError as e: raise HTTPException(status_code=422, detail=str(e))
+    try:
+        validate_ir(ir_json_consolidada)
+        print("JSON Schema validado com sucesso!")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
     program_dir = BASE_SANDBOX / req.cliente / Path(req.arquivo).stem
     main_pkg_dir = program_dir / "src" / "main" / "java" / "com" / "ifroix" / "atlas"
     test_pkg_dir = program_dir / "src" / "test" / "java" / "com" / "ifroix" / "atlas"
     main_pkg_dir.mkdir(parents=True, exist_ok=True)
     test_pkg_dir.mkdir(parents=True, exist_ok=True)
-    
-    with open(program_dir / "pom.xml", "w", encoding="utf-8") as f: f.write(POM_XML_TEMPLATE)
-    
+
+    with open(program_dir / "pom.xml", "w", encoding="utf-8") as f:
+        f.write(POM_XML_TEMPLATE)
+
     out_filename = f"{class_name}.java"
     out_main_path = main_pkg_dir / out_filename
     out_test_path = test_pkg_dir / f"{class_name}Test.java"
@@ -370,19 +565,27 @@ async def convert_mcp(req: ConvertRequest):
     java_code = ""
     test_code = ""
     cobol_clause_key = "GENERIC"
-    if "COMMIT" in cobol_clean or "ROLLBACK" in cobol_clean: cobol_clause_key = "COMMIT_ROLLBACK"
-    elif "INSERT" in cobol_clean: cobol_clause_key = "INSERT"
-    elif "UPDATE" in cobol_clean or "DELETE" in cobol_clean: cobol_clause_key = "UPDATE_DELETE"
-    elif "EXEC SQL" in cobol_clean: cobol_clause_key = "EXEC_SQL"
-    
+    if "COMMIT" in cobol_clean or "ROLLBACK" in cobol_clean:
+        cobol_clause_key = "COMMIT_ROLLBACK"
+    elif "INSERT" in cobol_clean:
+        cobol_clause_key = "INSERT"
+    elif "UPDATE" in cobol_clean or "DELETE" in cobol_clean:
+        cobol_clause_key = "UPDATE_DELETE"
+    elif "EXEC SQL" in cobol_clean:
+        cobol_clause_key = "EXEC_SQL"
+
     successful_attempt = 0
     final_error_for_postmortem = None
 
     while tentativa <= MAX_TENTATIVAS:
         print(f"[MCP] Fase 6: LLM -> Java + Teste (Tentativa {tentativa})...")
-        if tentativa == 1: java_prompt = build_java_from_ir_prompt(ir_json_consolidada, class_name, sql_templates)
-        else: java_prompt = build_correction_prompt(java_code, compile_error, class_name)
-        
+        if tentativa == 1:
+            java_prompt = build_java_from_ir_prompt(
+                ir_json_consolidada, class_name, sql_templates
+            )
+        else:
+            java_prompt = build_correction_prompt(java_code, compile_error, class_name)
+
         try:
             llm_output = call_ollama(java_prompt)
             java_code, test_code, warnings = extract_java_files(llm_output, class_name)
@@ -392,73 +595,104 @@ async def convert_mcp(req: ConvertRequest):
             compile_error = str(e)
             tentativa += 1
             continue
-        
-        with open(out_main_path, "w", encoding="utf-8") as f: f.write(java_code)
-        if test_code:
-            with open(out_test_path, "w", encoding="utf-8") as f: f.write(test_code)
 
-        print(f"[MCP] Fase 7: Maven Test (Tentativa {tentativa})...")
+        with open(out_main_path, "w", encoding="utf-8") as f:
+            f.write(java_code)
+        if test_code:
+            with open(out_test_path, "w", encoding="utf-8") as f:
+                f.write(test_code)
+
+        print(f"[MCP] Fase 7: K8s Ephemeral Verifier (Tentativa {tentativa})...")
         compile_error = None
         try:
-            try: result = subprocess.run(["mvn", "clean", "test"], cwd=program_dir, capture_output=True, text=True, timeout=TIMEOUT_SEC)
-            except FileNotFoundError: result = subprocess.run([r"C:\apache-maven-3.9.16\bin\mvn.cmd", "clean", "test"], cwd=program_dir, capture_output=True, text=True, timeout=TIMEOUT_SEC)
-            
+            # ========================================================
+            # REFATORAÇÃO: Maven local substituído por K8s Job
+            # ========================================================
+            verifier = AtlasK8sVerifier()
+            result = verifier.run_ephemeral_verifier(str(program_dir))
+
             if result.returncode == 0:
-                print(f"✅ Maven compilou e TESTES PASSARAM na tentativa {tentativa}!")
+                print(f"✅ K8s Verifier: Testes PASSARAM na tentativa {tentativa}!")
                 successful_attempt = tentativa
                 break
             else:
-                compile_error = result.stdout
+                compile_error = result.stdout + "\n" + result.stderr
                 final_error_for_postmortem = compile_error
-                print(f"❌ Erro de compilacao/teste na tentativa {tentativa}. Verificando memoria...")
+                print(
+                    f"❌ Erro de compilacao/teste na tentativa {tentativa}. Verificando memoria..."
+                )
                 cached_fix = retrieve_episodic_fix(compile_error, cobol_clause_key)
                 if cached_fix:
                     print("[Memoria] Aplicando correcao recuperada do ChromaDB!")
-                    correction_prompt = build_correction_prompt(java_code, compile_error, class_name)
+                    correction_prompt = build_correction_prompt(
+                        java_code, compile_error, class_name
+                    )
         except Exception as e:
             compile_error = str(e)
             break
         tentativa += 1
 
-    if successful_attempt > 1 and final_error_for_postmortem: save_postmortem(final_error_for_postmortem, cobol_clause_key, java_code)
-    
+    if successful_attempt > 1 and final_error_for_postmortem:
+        save_postmortem(final_error_for_postmortem, cobol_clause_key, java_code)
+
     job_id = f"JOB_{class_name}_{int(time.time())}"
     if compile_error is None:
         if risk_level == "HIGH":
             save_approval_audit(job_id, class_name, risk_level, "PENDING")
-            print(f"🛑 [Approval Gate] Risco ALTO. Aguardando aprovação humana para {class_name}.")
+            print(
+                f"🛑 [Approval Gate] Risco ALTO. Aguardando aprovação humana para {class_name}."
+            )
         else:
             save_approval_audit(job_id, class_name, risk_level, "AUTO_APPROVED")
             print(f"🟢 [Approval Gate] Risco {risk_level}. Auto-aprovado.")
     else:
         save_approval_audit(job_id, class_name, risk_level, "FAILED")
-    
+
     duration = int((time.time() - start_time) * 1000)
-    return {"ok": compile_error is None, "maven_log": compile_error if compile_error else "Sucesso", "envelope_enviado": envelope, "ir_json_gerada": ir_json_consolidada, "java_code": java_code, "test_code": test_code, "duration_ms": duration, "rag_sql_templates_usados": len(sql_templates), "chunks_count": chunks_count, "risk_level": risk_level, "job_id": job_id}
+    return {
+        "ok": compile_error is None,
+        "maven_log": compile_error if compile_error else "Sucesso",
+        "envelope_enviado": envelope,
+        "ir_json_gerada": ir_json_consolidada,
+        "java_code": java_code,
+        "test_code": test_code,
+        "duration_ms": duration,
+        "rag_sql_templates_usados": len(sql_templates),
+        "chunks_count": chunks_count,
+        "risk_level": risk_level,
+        "job_id": job_id,
+    }
+
 
 @app.post("/api/approve")
 async def approve_conversion(req: ApprovalRequest):
     print(f"\n🛑 APPROVAL GATE: Recebida decisão para {req.program_name}")
     print(f"👉 Decisão: {req.decision}")
-    
+
     if req.decision not in ["APPROVED", "REJECTED"]:
         raise HTTPException(status_code=400, detail="Decisao invalida.")
-        
+
     save_approval_audit(
-        job_id=req.job_id, 
-        program_name=req.program_name, 
-        risk_level="HIGH", 
-        status=req.decision
+        job_id=req.job_id,
+        program_name=req.program_name,
+        risk_level="HIGH",
+        status=req.decision,
     )
-    
-    return {"status": "success", "message": f"Conversao {req.program_name} foi {req.decision}."}
+
+    return {
+        "status": "success",
+        "message": f"Conversao {req.program_name} foi {req.decision}.",
+    }
+
 
 @app.post("/api/chat")
 async def chat_with_ollama(req: ChatRequest):
     prompt = f"Voce e o Atlas, assistente senior. Responda curto: {req.message}"
     return {"response": call_ollama(prompt, temperature=0.3).strip()}
 
+
 if __name__ == "__main__":
     import uvicorn
-    print("Atlas API v6.1 (Risk Engine Fix + Import Rule) rodando na porta 8000!")
+
+    print("Atlas API v6.1 (K8s Verifier Refactored) rodando na porta 8000!")
     uvicorn.run(app, host="0.0.0.0", port=8000)
